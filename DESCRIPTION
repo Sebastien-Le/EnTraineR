@@ -1,0 +1,19 @@
+Package: EnTraineR
+Type: Package
+Title: Enhanced Teaching Assistant (AI) for Statistical Analysis
+Version: 0.1.0
+Authors@R: c(
+    person('Sébastien', 'Lê', role = c('aut', 'cre'), email = 'sebastien.le@institut-agro.fr',
+    comment = c(ORCID = "0000-0001-8814-6714"))
+  )
+Description: An assistant built on large language models that helps interpret statistical model outputs in R by generating concise, audience-specific explanations.
+License: MIT + file LICENSE
+Encoding: UTF-8
+LazyData: true
+Imports:
+    ollamar
+Suggests:
+    FactoMineR
+RoxygenNote: 7.3.2
+Depends: 
+    R (>= 3.5)
