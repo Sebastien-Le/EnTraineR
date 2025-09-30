@@ -1,4 +1,6 @@
-<img src="man/figures/logo.png" alt="EnTraineR logo" align="center" height="140" />
+<p align="center">
+  <img src="man/figures/logo.png" alt="EnTraineR logo" height="200">
+</p>
 
 
 
