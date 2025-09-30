@@ -73,10 +73,14 @@ library(SensoMineR)
 data(chocolates)
 
 # Build AovSum (example similar to chocolates::Granular ~ Product*Panelist)
-res <- AovSum(Granular ~ Product*Panelist, data = chocolates)
+res <- AovSum(Granular ~ Product*Panelist, data = sensochoc)
 
-intro <- "Six chocolates were evaluated by a sensory panel on a granular attribute."
+intro <- "Six chocolates have been evaluated by a sensory panel,
+  during two days, according to a sensory attribute: granular.
+  The panel has been trained according to this attribute
+  and panellists should be reproducible when rating this attribute."
 intro <- gsub("\n", " ", intro)
+intro <- stringr::str_squish(intro)
 
 p <- trainer_AovSum(
   aovsum_obj   = res,
