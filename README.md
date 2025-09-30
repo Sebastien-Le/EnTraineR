@@ -53,6 +53,8 @@ The package ships 3 small datasets for teaching:
   Chick weights by brooding `Temperature` (T1/T2/T3) and `Gender` (Female/Male).  
   Useful for two-factor ANOVA examples.
 
+These datasets are the intellectual property of L'Institut Agro Rennes Angers and are used for the 'Statistical Approach' course module.
+
 ```r
 data(deforestation); str(deforestation)
 data(ham); summary(ham)
