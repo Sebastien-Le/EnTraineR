@@ -1,3 +1,5 @@
+<img src="man/figures/logo.png" alt="EnTraineR logo" align="right" height="140" />
+
 # EnTraineR
 
 An intelligent teaching assistant based on LLMs to help interpret statistical model outputs in R.  
