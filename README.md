@@ -40,6 +40,8 @@ Optional but recommended packages for examples:
   - `applied`: decisions and practical implications
   - `advanced`: technical but concise, with appropriate cautions
 - **No invented numbers**: only uses the verbatim output you provide.
+- **Gemini integration (optional)**:
+  - `gemini_generate()` sends your prompt to Google Gemini (Generative Language API) and returns the text reply.
 
 ---
 
@@ -169,7 +171,25 @@ cat(trainer_chisq_test(cx, audience = "beginner"))
 ```
 
 ---
+## Using Gemini from R (optional)
 
+`gemini_generate()` lets you send a prompt to Google Gemini and get the response back as text.
+
+```r
+# 1) Set your API key once per session (or in .Renviron)
+Sys.setenv(GEMINI_API_KEY = "your_key_here")
+
+# 2) Send a prompt
+txt <- gemini_generate(
+  prompt     = "Say hello in one short sentence.",
+  model      = "gemini-2.5-flash",   # accepts "gemini-2.5-flash" or "models/gemini-2.5-flash"
+  temperature = 0.2,
+  user_agent = "EnTraineR/0.9.0 (https://github.com/Sebastien-Le/EnTraineR)"
+)
+cat(txt)
+```
+
+---
 ## Audience profiles (summary)
 
 - **beginner**: plain English, define what is tested, minimal jargon, short sentences.
