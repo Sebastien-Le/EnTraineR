@@ -83,8 +83,8 @@ data(chocolates)
 # Build AovSum (example similar to chocolates::Granular ~ Product*Panelist)
 res <- AovSum(Granular ~ Product*Panelist, data = sensochoc)
 
-intro <- "Six chocolates have been evaluated by a sensory panel,
-  during two days, according to a sensory attribute: granular.
+intro <- "Six chocolates have been evaluated by a sensory panel, 
+  according to a sensory attribute: granular.
   The panel has been trained according to this attribute
   and panellists should be reproducible when rating this attribute."
 intro <- gsub("\n", " ", intro)
