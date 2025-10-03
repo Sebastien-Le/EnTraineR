@@ -2,13 +2,13 @@
 % Please edit documentation in R/gemini_generate.R
 \name{gemini_generate}
 \alias{gemini_generate}
-\title{Generate text with Google Gemini (Generative Language API)}
+\title{Generate text with Google Gemini (Generative Language API) - robust w/ retries}
 \usage{
 gemini_generate(
   prompt,
   model = "gemini-2.5-flash",
   api_key = Sys.getenv("GEMINI_API_KEY"),
-  user_agent = "EnTraineR/0.1.0 (https://github.com/Sebastien-Le/EnTraineR)",
+  user_agent = "EnTraineR/0.9.0 (https://github.com/Sebastien-Le/EnTraineR)",
   base_url = "https://generativelanguage.googleapis.com/v1beta",
   temperature = NULL,
   top_p = NULL,
@@ -18,8 +18,11 @@ gemini_generate(
   system_instruction = NULL,
   safety_settings = NULL,
   seed = NULL,
-  timeout = 60,
-  verbose = FALSE
+  timeout = 120,
+  verbose = FALSE,
+  max_tries = 5,
+  backoff_base = 0.8,
+  backoff_cap = 8
 )
 }
 \arguments{
@@ -32,10 +35,10 @@ gemini_generate(
 `GEMINI_API_KEY`.}
 
 \item{user_agent}{Character scalar for the HTTP User-Agent header.
-Defaults to "EnTraineR/0.1.0 (https://github.com/Sebastien-Le/EnTraineR)".}
+Default: "EnTraineR/0.9.0 (https://github.com/Sebastien-Le/EnTraineR)".}
 
-\item{base_url}{Character scalar. API base URL. Default:
-"https://generativelanguage.googleapis.com/v1beta".}
+\item{base_url}{Character scalar. API base URL.
+Default: "https://generativelanguage.googleapis.com/v1beta".}
 
 \item{temperature}{Optional numeric in [0, 2]. Sampling temperature.}
 
@@ -43,33 +46,48 @@ Defaults to "EnTraineR/0.1.0 (https://github.com/Sebastien-Le/EnTraineR)".}
 
 \item{top_k}{Optional integer >= 1. Top-k sampling.}
 
-\item{max_output_tokens}{Optional integer > 0. Max tokens in response.}
+\item{max_output_tokens}{Optional integer > 0. Maximum tokens in response.}
 
 \item{stop_sequences}{Optional character vector of stop strings.}
 
-\item{system_instruction}{Optional character scalar for system instruction.}
+\item{system_instruction}{Optional character scalar with a system instruction.}
 
 \item{safety_settings}{Optional list passed as-is to the API (advanced).}
 
-\item{seed}{Optional integer for deterministic sampling (where supported).}
+\item{seed}{Optional integer seed for deterministic sampling (where supported).}
 
-\item{timeout}{Numeric seconds for HTTP request timeout (default 60).}
+\item{timeout}{Numeric seconds for the HTTP request timeout (default 120).}
 
-\item{verbose}{Logical; if TRUE prints the resolved URL and model.}
+\item{verbose}{Logical; if TRUE, prints the resolved URL and retry notices.}
+
+\item{max_tries}{Integer. Maximum attempts per call (default 5).}
+
+\item{backoff_base}{Numeric. Initial backoff seconds (default 0.8).}
+
+\item{backoff_cap}{Numeric. Maximum backoff seconds (default 8).}
 }
 \value{
 Character scalar with the first candidate's text. If no text is
-  returned, an informative error is thrown with finish reason or safety info.
+returned, an informative error is thrown (finish reason or safety block).
 }
 \description{
-Minimal wrapper around the Google Generative Language API
-`:generateContent` endpoint for text prompts.
+Minimal wrapper around the Generative Language API
+`:generateContent` endpoint for text prompts, with retries,
+exponential backoff, and clearer errors.
+}
+\details{
+The function retries on common transient failures (network timeouts,
+HTTP 429, HTTP 5xx). Backoff is exponential with jitter and capped by
+`backoff_cap`. The first successful candidate's text is returned.
 }
 \examples{
 \dontrun{
 Sys.setenv(GEMINI_API_KEY = "YOUR_KEY")
-gemini_generate("Say hello in one short sentence.",
-                model = "gemini-2.5-flash")
+gemini_generate(
+  prompt = "Say hello in one short sentence.",
+  model  = "gemini-2.5-flash",
+  verbose = TRUE
+)
 }
 
 }
