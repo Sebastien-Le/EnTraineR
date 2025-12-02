@@ -73,6 +73,8 @@ prompt <- trainer_PCA(res_pca,
                 generate = FALSE)
 
 cat(prompt)
+
+res <- gemini_generate(prompt, compile_to = "html")
 }
 }
 }

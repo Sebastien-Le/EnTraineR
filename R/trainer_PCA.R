@@ -49,6 +49,8 @@
 #'                 generate = FALSE)
 #'
 #' cat(prompt)
+#'
+#' res <- gemini_generate(prompt, compile_to = "html")
 #' }
 #' }
 trainer_PCA <- function(pca_obj,

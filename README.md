@@ -1,18 +1,12 @@
-<p align="center">
-  <img src="man/figures/logo.png" alt="EnTraineR logo" height="200">
-</p>
-
-
-
 # EnTraineR
+
+![EnTraineR logo](man/figures/logo.png)
 
 An intelligent teaching assistant based on LLMs to help interpret statistical model outputs in R.  
 `EnTraineR` builds audience-aware prompts (beginner, applied, advanced) that **never invent numbers**: it passes verbatim outputs from R and instructs how to explain them.
 
-> Works out-of-the-box to produce high-quality prompts.  
+> Works out of the box to produce high-quality prompts.  
 > Optionally, you can connect your own LLM backend (via your functions built on top of `trainer_core_generate_or_return()`).
-
----
 
 ## Installation
 
@@ -24,26 +18,22 @@ remotes::install_github("Sebastien-Le/EnTraineR")
 ```
 
 Optional but recommended packages for examples:
-- `FactoMineR`, `SensoMineR` (model objects used in examples)
-- `stringr` (to squish multi-line intros)
-
----
+- FactoMineR, SensoMineR (model objects used in examples)
+- stringr (to squish multi-line intros)
 
 ## What it does
 
-- **Generates clean prompts** to interpret:
+- Generates clean prompts to interpret:
   - ANOVA summaries (`AovSum`) with F-tests and T-tests
   - Linear models (`FactoMineR::LinearModel`) including model selection notes
   - Classical tests: t-test, variance F-test, proportion test, correlation test, chi-squared test
-- **Audience-aware** guidance:
+- Audience-aware guidance:
   - `beginner`: plain-language teaching focus
   - `applied`: decisions and practical implications
   - `advanced`: technical but concise, with appropriate cautions
-- **No invented numbers**: only uses the verbatim output you provide.
-- **Gemini integration (optional)**:
+- No invented numbers: only uses the verbatim output you provide.
+- Gemini integration (optional):
   - `gemini_generate()` sends your prompt to Google Gemini (Generative Language API) and returns the text reply.
-
----
 
 ## Included datasets
 
@@ -61,15 +51,13 @@ The package ships 3 small datasets for teaching:
   Chick weights by brooding `Temperature` (T1/T2/T3) and `Gender` (Female/Male).  
   Useful for two-factor ANOVA examples.
 
-These datasets are the intellectual property of L'Institut Agro Rennes Angers and are used for the 'Statistical Approach' course module.
+These datasets are the intellectual property of L'Institut Agro Rennes Angers and are used for the "Statistical Approach" course module.
 
 ```r
 data(deforestation); str(deforestation)
 data(ham); summary(ham)
 data(poussin); with(poussin, table(Temperature, Gender))
 ```
-
----
 
 ## Quick start
 
@@ -145,7 +133,7 @@ cat(trainer_t_test(tt, audience = "beginner"))
 
 Variance F-test:
 ```r
-vt <- var.test(rnorm(25, sd=1.0), rnorm(30, sd=1.3))
+vt <- var.test(rnorm(25, sd = 1.0), rnorm(30, sd = 1.3))
 cat(trainer_var_test(vt, audience = "applied"))
 ```
 
@@ -158,7 +146,7 @@ cat(trainer_prop_test(pt, audience = "advanced", summary_only = TRUE))
 Correlation test:
 ```r
 set.seed(1)
-x <- rnorm(30); y <- 0.5*x + rnorm(30, sd = 0.8)
+x <- rnorm(30); y <- 0.5 * x + rnorm(30, sd = 0.8)
 ct <- cor.test(x, y, method = "pearson")
 cat(trainer_cor_test(ct, audience = "applied"))
 ```
@@ -170,7 +158,6 @@ cx <- chisq.test(m, correct = TRUE)
 cat(trainer_chisq_test(cx, audience = "beginner"))
 ```
 
----
 ## Using Gemini from R (optional)
 
 `gemini_generate()` lets you send a prompt to Google Gemini and get the response back as text.
@@ -181,15 +168,14 @@ Sys.setenv(GEMINI_API_KEY = "your_key_here")
 
 # 2) Send a prompt
 txt <- gemini_generate(
-  prompt     = "Say hello in one short sentence.",
-  model      = "gemini-2.5-flash",   # accepts "gemini-2.5-flash" or "models/gemini-2.5-flash"
+  prompt      = "Say hello in one short sentence.",
+  model       = "gemini-2.5-flash",   # accepts "gemini-2.5-flash" or "models/gemini-2.5-flash"
   temperature = 0.2,
-  user_agent = "EnTraineR/0.9.0 (https://github.com/Sebastien-Le/EnTraineR)"
+  user_agent  = "EnTraineR/0.9.0 (https://github.com/Sebastien-Le/EnTraineR)"
 )
 cat(txt)
 ```
 
----
 ## Audience profiles (summary)
 
 - **beginner**: plain English, define what is tested, minimal jargon, short sentences.
@@ -198,30 +184,22 @@ cat(txt)
 
 All prompts emphasize: **do not invent numbers**; use only what appears in the printed output.
 
----
-
 ## Reproducibility and LLMs
 
 By default, trainers return a **prompt string** (i.e., `generate = FALSE`).  
 If you have a generator backend, you can pass `generate = TRUE` and a `llm_model` name; implement your own `trainer_core_generate_or_return()` to call your LLM API.
 
----
-
 ## Contributing
 
 Issues and pull requests are welcome. Please:
 - Keep code ASCII and roxygen2-ready.
-- Add tests/examples where relevant.
+- Add tests and examples where relevant.
 - Follow the audience style guidelines.
-
----
 
 ## License and citation
 
 See the `DESCRIPTION` file for license terms.  
 If `EnTraineR` helps your teaching or analyses, starring the repo is appreciated.
-
----
 
 ## Acknowledgments
 
