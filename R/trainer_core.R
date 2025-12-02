@@ -33,6 +33,13 @@ trainer_core_capture <- function(x) paste(utils::capture.output(print(x)), colla
 #' @noRd
 trainer_core_esc <- function(x) gsub("([\\W])", "\\\\\\1", x, perl = TRUE)
 
+#' Quote literal text for regex using \\Q...\\E (handles spaces, (), +, etc.)
+#' @param x Character scalar.
+#' @return Quoted string safe for regex (requires perl=TRUE).
+#' @keywords internal
+#' @noRd
+trainer_core_quote <- function(x) paste0("\\Q", x, "\\E")
+
 #' Format alpha with 3 decimals
 #' @param alpha Numeric.
 #' @return Character.
@@ -40,6 +47,54 @@ trainer_core_esc <- function(x) gsub("([\\W])", "\\\\\\1", x, perl = TRUE)
 #' @noRd
 trainer_core_fmt_alpha <- function(alpha) format(alpha, digits = 3)
 
+#' Is scalar number helper
+#' @param x any
+#' @return TRUE if length-1 numeric and finite
+#' @keywords internal
+#' @noRd
+trainer_core_is_scalar_number <- function(x) {
+  is.numeric(x) && length(x) == 1L && is.finite(x)
+}
+
+#' Sanitize alpha (fallback to default if invalid)
+#' @param alpha numeric in (0,1)
+#' @param default numeric fallback
+#' @return numeric scalar in (0,1)
+#' @keywords internal
+#' @noRd
+trainer_core_alpha_sanitize <- function(alpha, default = 0.05) {
+  if (!trainer_core_is_scalar_number(alpha) || alpha <= 0 || alpha >= 1) default else alpha
+}
+
+#' Human-readable label for alternative hypothesis
+#' @param alternative character: "two.sided", "less", "greater"
+#' @return character label
+#' @keywords internal
+#' @noRd
+trainer_core_alt_label <- function(alternative) {
+  alt <- tolower(alternative %||% "two.sided")
+  switch(
+    alt,
+    "less"      = "one-sided (less)",
+    "greater"   = "one-sided (greater)",
+    "two.sided" = "two-sided",
+    alternative
+  )
+}
+
+#' Wrap a code block with an optional title
+#' @param title character title
+#' @param lines character vector content
+#' @return single character with fenced code block
+#' @keywords internal
+#' @noRd
+trainer_core_wrap_block <- function(title, lines) {
+  if (!length(lines)) return(paste(title, "(not available)", sep = "\n"))
+  paste0(
+    if (nzchar(title)) paste0(title, "\n") else "",
+    "```\n", trainer_core_collapse(lines), "\n```"
+  )
+}
 
 # ---- Audience profile & prompt header ---------------------------------------
 
@@ -64,6 +119,7 @@ trainer_core_audience_profile <- function(audience = c("beginner","applied","adv
                                           alpha = 0.05,
                                           summary_only = FALSE) {
   audience <- match.arg(audience)
+  alpha <- trainer_core_alpha_sanitize(alpha)
   phr <- list(
     guard       = "NO INVENTED NUMBERS. Use only values present in the output.",
     alpha_round = paste0("Use alpha = ", trainer_core_fmt_alpha(alpha),
@@ -232,7 +288,6 @@ trainer_core_llm_generate <- function(model, prompt, engine = c("ollamar", "none
   list(prompt = prompt, response = resp, model = model, engine = "ollamar")
 }
 
-
 #' Generate or return a prompt, depending on `generate`
 #'
 #' @param prompt Character prompt to return or send.
@@ -247,7 +302,6 @@ trainer_core_generate_or_return <- function(prompt, llm_model = "llama3", genera
   if (!generate) return(prompt)
   trainer_core_llm_generate(llm_model, prompt)
 }
-
 
 # ---- ANOVA/LinearModel text extraction & T-test filtering -------------------
 
@@ -272,6 +326,36 @@ trainer_core_extract_block_after <- function(txt, header) {
   out
 }
 
+#' Heuristic extractor for F-test / T-test blocks when headers are missing
+#' @param txt single string (printed output)
+#' @return list(ftest_lines, ttest_lines)
+#' @keywords internal
+#' @noRd
+trainer_core_extract_tables_heuristic <- function(txt) {
+  lines <- unlist(strsplit(txt, "\n", fixed = TRUE), use.names = FALSE)
+  idx_f <- suppressWarnings(grep("SS.*df.*MS", lines))[1]
+  idx_t <- suppressWarnings(grep("Estimate.*Std\\.?\\s*Error", lines))[1]
+
+  ftest_lines <- character(0)
+  ttest_lines <- character(0)
+
+  if (!is.na(idx_f) && !is.na(idx_t)) {
+    if (idx_f < idx_t) {
+      ftest_lines <- lines[idx_f:(idx_t - 1L)]
+      ttest_lines <- lines[idx_t:length(lines)]
+    } else {
+      ttest_lines <- lines[idx_t:(idx_f - 1L)]
+      ftest_lines <- lines[idx_f:length(lines)]
+    }
+  } else if (!is.na(idx_f)) {
+    ftest_lines <- lines[idx_f:length(lines)]
+  } else if (!is.na(idx_t)) {
+    ttest_lines <- lines[idx_t:length(lines)]
+  }
+
+  list(ftest_lines = ftest_lines, ttest_lines = ttest_lines)
+}
+
 #' Filter T-test lines by requested factors (main and/or interactions)
 #' @param tt_lines Character vector of T-test lines.
 #' @param keep_factors Character vector of factor names or "A:B".
@@ -284,47 +368,51 @@ trainer_core_extract_block_after <- function(txt, header) {
 trainer_core_filter_ttest_by_factors <- function(tt_lines, keep_factors = NULL, keep_intercept = TRUE) {
   if (!length(tt_lines)) return(character(0))
 
-  # Detect header line position (robust to spacing)
-  header_idx <- which(grepl("\\bEstimate\\b", tt_lines) |
-                        grepl("Std\\.?\\s*Error", tt_lines) |
-                        grepl("\\bt value\\b", tt_lines) |
-                        grepl("Pr\\(>\\|?t\\|?\\)", tt_lines))
+  # détecter position du header (si présent)
+  header_idx <- which(grepl("\\bEstimate\\b", tt_lines, perl = TRUE) |
+                        grepl("Std\\.?\\s*Error", tt_lines, perl = TRUE) |
+                        grepl("\\bt value\\b", tt_lines, perl = TRUE) |
+                        grepl("Pr\\(>\\|?t\\|?\\)", tt_lines, perl = TRUE))
   header_pos <- if (length(header_idx)) min(header_idx) else NA_integer_
 
-  is_intercept   <- grepl("^\\s*\\(Intercept\\)", tt_lines)
-  is_interaction <- grepl(":", tt_lines)
+  is_intercept   <- grepl("^\\s*\\(Intercept\\)", tt_lines, perl = TRUE)
+  is_interaction <- grepl(":", tt_lines, fixed = TRUE)
 
-  # Default: no filter -> keep all (but still ensure header is kept)
+  # Pas de filtre -> on garde tout (en respectant keep_intercept)
   if (is.null(keep_factors)) {
     keep <- rep(TRUE, length(tt_lines))
     if (!keep_intercept) keep <- keep & !is_intercept
-    # force-keep header if detected
     if (!is.na(header_pos)) keep[seq_len(header_pos)] <- TRUE
     return(tt_lines[keep])
   }
 
-  req_main  <- keep_factors[!grepl(":", keep_factors)]
-  req_inter <- keep_factors[ grepl(":", keep_factors)]
+  req_main  <- keep_factors[!grepl(":", keep_factors, fixed = TRUE)]
+  req_inter <- keep_factors[ grepl(":", keep_factors, fixed = TRUE)]
 
+  # match des main effects: "Factor Name - level ..."
   keep_main <- rep(FALSE, length(tt_lines))
   if (length(req_main)) {
     keep_main <- Reduce(`|`, lapply(req_main, function(f) {
-      grepl(paste0("^\\s*", trainer_core_esc(f), "\\s-\\s"), tt_lines) & !is_interaction
+      pat <- paste0("^\\s*", trainer_core_quote(trimws(f)), "\\s-\\s")
+      grepl(pat, tt_lines, perl = TRUE) & !is_interaction
     }))
   }
 
+  # match des interactions: "A - a : B - b" (ordre symétrique)
   keep_inter <- rep(FALSE, length(tt_lines))
   if (length(req_inter)) {
     keep_inter <- Reduce(`|`, lapply(req_inter, function(f) {
       parts <- strsplit(f, ":", fixed = TRUE)[[1]]
       if (length(parts) != 2) return(rep(FALSE, length(tt_lines)))
-      a <- trainer_core_esc(trimws(parts[1])); b <- trainer_core_esc(trimws(parts[2]))
+      a <- trainer_core_quote(trimws(parts[1]))
+      b <- trainer_core_quote(trimws(parts[2]))
       grepl(
         paste0(
           "^\\s*", a, "\\s-\\s.*:\\s*", b, "\\s-\\s", "|",
           "^\\s*", b, "\\s-\\s.*:\\s*", a, "\\s-\\s"
         ),
-        tt_lines
+        tt_lines,
+        perl = TRUE
       )
     }))
   }
@@ -332,27 +420,36 @@ trainer_core_filter_ttest_by_factors <- function(tt_lines, keep_factors = NULL, 
   keep <- keep_main | keep_inter
   if (keep_intercept) keep <- keep | is_intercept
 
-  # Always keep header rows if detected
-  if (!is.na(header_pos)) {
-    header_keep <- seq_len(header_pos)
-    keep[header_keep] <- TRUE
-  }
+  # Toujours conserver les lignes d’entête si détectées
+  if (!is.na(header_pos)) keep[seq_len(header_pos)] <- TRUE
 
   tt_lines[keep]
 }
 
 #' Detect main-effect factor names present in T-test lines (ignore interactions)
+#' Space-safe: captures everything before " - " on non-interaction rows.
 #' @param tt_lines Character vector.
 #' @return Character vector of factor names.
 #' @export
-#'
-#' @examples
-#' trainer_core_detect_main_factors(c("A - a", "B - b:C - c"))
 trainer_core_detect_main_factors <- function(tt_lines) {
-  unique(stats::na.omit(sub(
-    "^\\s*([^ -][^ -]*)\\s-.*$", "\\1",
-    tt_lines[grepl("\\s-\\s", tt_lines) & !grepl(":", tt_lines)]
-  )))
+  if (!length(tt_lines)) return(character(0))
+
+  x <- tt_lines
+  # enlever header/vides
+  drop <- grepl("\\bEstimate\\b", x, perl = TRUE) |
+    grepl("Std\\.?\\s*Error", x, perl = TRUE) |
+    grepl("Pr\\(>\\|?t\\|?\\)", x, perl = TRUE) |
+    grepl("^\\s*$", x, perl = TRUE)
+  x <- x[!drop]
+
+  # garder seulement les lignes "main effects" (pas d'interaction) avec " - "
+  x <- x[!grepl(":", x, fixed = TRUE)]
+  x <- x[grepl("\\s-\\s", x, perl = TRUE)]
+
+  # capturer le nom du facteur avant " - "
+  fac <- sub("^\\s*(.+?)\\s-\\s.*$", "\\1", x, perl = TRUE)
+  fac <- trimws(fac)
+  unique(fac[nzchar(fac)])
 }
 
 #' Determine which requested items were actually shown after filtering
@@ -367,23 +464,25 @@ trainer_core_detect_main_factors <- function(tt_lines) {
 trainer_core_actually_shown <- function(req_main, req_inter, ttest_filtered) {
   found_main <- character(0)
   if (length(req_main)) {
-    found_main <- req_main[vapply(req_main, function(f)
-      any(grepl(paste0("^\\s*", trainer_core_esc(f), "\\s-\\s"), ttest_filtered) & !grepl(":", ttest_filtered)),
-      logical(1)
-    )]
+    found_main <- req_main[vapply(req_main, function(f) {
+      pat <- paste0("^\\s*", trainer_core_quote(f), "\\s-\\s")
+      any(grepl(pat, ttest_filtered, perl = TRUE) & !grepl(":", ttest_filtered, fixed = TRUE))
+    }, logical(1))]
   }
+
   found_inter <- character(0)
   if (length(req_inter)) {
     found_inter <- req_inter[vapply(req_inter, function(f) {
       parts <- strsplit(f, ":", fixed = TRUE)[[1]]
       if (length(parts) != 2) return(FALSE)
-      a <- trainer_core_esc(trimws(parts[1])); b <- trainer_core_esc(trimws(parts[2]))
+      a <- trainer_core_quote(trimws(parts[1])); b <- trainer_core_quote(trimws(parts[2]))
       any(grepl(
         paste0(
           "^\\s*", a, "\\s-\\s.*:\\s*", b, "\\s-\\s", "|",
           "^\\s*", b, "\\s-\\s.*:\\s*", a, "\\s-\\s"
         ),
-        ttest_filtered
+        ttest_filtered,
+        perl = TRUE
       ))
     }, logical(1))]
   }
@@ -411,4 +510,31 @@ trainer_core_ttest_scope_msg <- function(t_test, requested, actually_shown) {
            paste(t_test, collapse = ", "),
            ". Showing only the Intercept.")
   }
+}
+
+
+#' Extract a block of lines between a start pattern and a set of stop patterns
+#'
+#' @param lines Character vector of output lines.
+#' @param start_pat Regex pattern to find the start line.
+#' @param stop_pats Character vector of regex patterns for stop signals.
+#' @return Character vector of lines (trimmed).
+#' @keywords internal
+#' @noRd
+trainer_core_extract_section <- function(lines, start_pat, stop_pats) {
+  i <- which(grepl(start_pat, lines, perl = TRUE))
+  if (!length(i)) return(character(0))
+
+  start <- i[1]
+  stop_idx <- length(lines) + 1L
+
+  for (sp in stop_pats) {
+    j_all <- which(grepl(sp, lines, perl = TRUE))
+    j <- j_all[j_all > start]
+    if (length(j)) stop_idx <- min(stop_idx, j[1])
+  }
+
+  out <- lines[start:(stop_idx - 1L)]
+  while (length(out) && grepl("^\\s*$", out[length(out)])) out <- out[-length(out)]
+  out
 }

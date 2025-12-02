@@ -18,36 +18,29 @@ trainer_LinearModel(
 \arguments{
 \item{lm_obj}{An object returned by FactoMineR::LinearModel(...).}
 
-\item{introduction}{Optional character string giving the study context.
-Defaults to a generic description.}
+\item{introduction}{Optional character string giving the study context.}
 
-\item{alpha}{Numeric significance level used as instruction for the LLM
-(no computation is performed). Default 0.05.}
+\item{alpha}{Numeric significance level (default 0.05).}
 
 \item{t_test}{Optional character vector to filter the T-test section by
-factor names and/or interactions expressed as "A:B". If NULL, all rows
-are shown.}
+factor names and/or interactions (e.g. "FactorA" or "FactorA:FactorB").}
 
 \item{audience}{One of c("beginner","applied","advanced").}
 
-\item{summary_only}{Logical; if TRUE, return a 3-bullet executive summary
-regardless of audience depth.}
+\item{summary_only}{Logical; if TRUE, return a 3-bullet executive summary.}
 
 \item{llm_model}{Character model name for the generator (e.g., "llama3").}
 
-\item{generate}{Logical; if TRUE, call trainer_core_generate_or_return()
-and return a list with prompt, response, and model. If FALSE, return
-the prompt string.}
+\item{generate}{Logical; if TRUE, call the generator.}
 }
 \value{
-Character prompt (if generate = FALSE) or a list with
-  prompt, response, and model.
+Character prompt or list.
 }
 \description{
 Builds an English-only, audience-tailored prompt to interpret a
-FactoMineR::LinearModel result. Handles selection = "aic", "bic",
-or "none". Never invents numbers: passes verbatim output and instructs
-interpretation only.
+FactoMineR::LinearModel result. Handles model selection (AIC/BIC) and
+instructs how to interpret deviation contrasts (sum-to-zero) for factors.
+Works for ANOVA, ANCOVA, and multiple regression.
 }
 \examples{
 # --- Example 1: multiple regression with selection (ham) -------------------

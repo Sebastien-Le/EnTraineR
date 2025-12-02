@@ -37,6 +37,7 @@ If generate = FALSE, a prompt string. If TRUE, a list with
 \description{
 Builds a clear, audience-tailored prompt to interpret stats::prop.test() results
 (one-sample vs target p, two-sample equality, k-group equality, or k-group vs given p).
+Aligned with other TraineR trainers: no invented numbers; audience-specific guidance.
 }
 \examples{
 # One-sample

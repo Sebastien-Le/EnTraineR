@@ -26,24 +26,29 @@
 #'   If \code{generate = TRUE}, a list with \code{prompt}, \code{response}, and \code{model}.
 #' @export
 #'
-#' @examples
+#'@examples
 #' \dontrun{
 #' # Example: decathlon (FactoMineR)
 #' if (requireNamespace("FactoMineR", quietly = TRUE)) {
-#'   data(decathlon, package = "FactoMineR")
-#'   res_pca <- FactoMineR::PCA(decathlon,
-#'                              quanti.sup = 11:12,
-#'                              quali.sup  = 13,
-#'                              graph = FALSE)
+#' data(decathlon, package = "FactoMineR")
 #'
-#'   intro <- "A study was conducted on decathlon athletes.
-#'   Performances on each event were measured and summarized by PCA."
-#'   intro <- gsub("\n", " ", intro); intro <- gsub("\\s+", " ", intro)
+#' res_pca <- FactoMineR::PCA(decathlon,
+#'                 quanti.sup = 11:12,
+#'                 quali.sup = 13,
+#'                 graph = FALSE)
 #'
-#'   pr <- trainer_PCA(res_pca, dimension = 1, proba = 0.05,
-#'                     introduction = intro, audience = "applied",
-#'                     generate = FALSE)
-#'   cat(pr)
+#' intro <- "A study was conducted on decathlon athletes.
+#' Performances on each event were measured and summarized by PCA."
+#' intro <- gsub("\n", " ", intro); intro <- gsub("\\s+", " ", intro)
+#'
+#' prompt <- trainer_PCA(res_pca,
+#'                 dimension = 1,
+#'                 proba = 0.05,
+#'                 introduction = intro,
+#'                 audience = "applied",
+#'                 generate = FALSE)
+#'
+#' cat(prompt)
 #' }
 #' }
 trainer_PCA <- function(pca_obj,
@@ -81,27 +86,13 @@ trainer_PCA <- function(pca_obj,
   sum_txt   <- trainer_core_capture(summary(pca_obj))
   sum_lines <- unlist(strsplit(sum_txt, "\n", fixed = TRUE), use.names = FALSE)
 
-  extract_section <- function(lines, start_pat, stop_pats) {
-    i <- which(grepl(start_pat, lines, perl = TRUE))
-    if (!length(i)) return(character(0))
-    start <- i[1]
-    stop_idx <- length(lines) + 1L
-    for (sp in stop_pats) {
-      j_all <- which(grepl(sp, lines, perl = TRUE))
-      j <- j_all[j_all > start]
-      if (length(j)) stop_idx <- min(stop_idx, j[1])
-    }
-    out <- lines[start:(stop_idx - 1L)]
-    while (length(out) && grepl("^\\s*$", out[length(out)])) out <- out[-length(out)]
-    out
-  }
-
-  indiv_block <- extract_section(
+  # Use centralized extraction helper
+  indiv_block <- trainer_core_extract_section(
     sum_lines,
     start_pat = "^\\s*Individuals\\b",
     stop_pats = c("^\\s*Variables\\b", "^\\s*Supplementary\\b", "^\\s*$")
   )
-  var_block <- extract_section(
+  var_block <- trainer_core_extract_section(
     sum_lines,
     start_pat = "^\\s*Variables\\b",
     stop_pats = c("^\\s*Supplementary\\b", "^\\s*$")
@@ -115,37 +106,42 @@ trainer_PCA <- function(pca_obj,
     if (!is.null(dd[[dim_key]])) {
       dd_block <- trainer_core_capture(dd[[dim_key]])
     } else {
-      # Fallback: print the returned object (may include other dims)
       dd_block <- trainer_core_capture(dd)
     }
-  } # else keep empty; we will display "(not available)"
+  }
 
   # ---- How-to-read block (audience-specific) --------------------------------
+  # IMPROVED: Explicitly mention "Latent Variable" or "Underlying concept" logic
   howto_block <- switch(
     profile$audience,
     "beginner" = paste(
       "### How to read (PCA dimension naming)",
-      "- Use variables to understand what the axis captures: high positive vs high negative associations.",
-      "- Axis orientation is arbitrary: choose a name that makes sense even if the sign flips.",
-      paste0("- Variables shown in dimdesc are filtered at p <= ", format(proba), "."),
+      "- Think of this axis as a new **'super-variable'** that summarizes the others.",
+      "- Name the **underlying theme** that separates the variables on the positive side from those on the negative side.",
+      "- **Check the sign**: Positive correlations pull one way, negative correlations pull the other.",
+      paste0("- Variables in dimdesc are filtered at p <= ", format(proba), ". If none pass, say: 'inconclusive at this threshold'."),
       "- Individuals are illustrations only; do not base the name on specific persons.",
-      "- Do not compute anything new; rely only on the printed outputs.",
+      "- Use very short sentences (<= 15 words). No new calculations.",
       sep = "\n"
     ),
     "applied" = paste(
       "### How to read (PCA dimension naming)",
-      "- Derive a concise, sign-agnostic name from variable patterns on both poles.",
-      paste0("- Use dimdesc correlations filtered at p <= ", format(proba), " to characterize the poles."),
-      "- Individuals with high contribution/quality can illustrate, not drive, the name.",
+      "- Name the **synthetic index** (latent factor) that drives the observed correlations.",
+      "- **Identify the opposition**: Contrast the group of variables with positive correlations vs. those with negative correlations.",
+      "- Keep the name sign-agnostic (it represents the continuum, not just one end).",
+      paste0("- Use dimdesc correlations at p <= ", format(proba), "; prefer variables with higher contribution/cos2."),
+      "- Add one 'so what' sentence on how this axis can be used.",
       "- No new calculations; use only printed material.",
       sep = "\n"
     ),
     "advanced" = paste(
       "### How to read (PCA dimension naming)",
-      "- Name should reflect the dominant structure captured by the component (loadings/correlations), not sample idiosyncrasies.",
-      "- Make the label sign-agnostic (orientation-free).",
-      paste0("- Interpret dimdesc under the stated threshold (p <= ", format(proba), "); do not infer beyond printed info."),
-      "- Individuals may be cited as archetypes; avoid any reconstruction beyond prints.",
+      "- Conceptualize the dimension as a **latent construct** (linear combination) explaining the variance.",
+      "- **Interpret the structural opposition** based on the sign of correlations (positive vs. negative).",
+      "- Ensure the label is sign-agnostic (orientation-free).",
+      paste0("- Interpret dimdesc under p <= ", format(proba), "; prioritize variables with higher contribution/cos2 and check coherence."),
+      "- You may add a brief stability note (sensitivity to threshold/sample), without new computations.",
+      "- Individuals may be cited as archetypes; avoid any reconstruction beyond printed info.",
       sep = "\n"
     )
   )
@@ -158,14 +154,32 @@ trainer_PCA <- function(pca_obj,
       label = paste0("PCA Dimension ", as.integer(dimension), " (naming)")
     )
   } else {
-    output_reqs <- paste0(
-      "## Output requirements (", toupper(profile$audience), ")\n",
-      "1) Propose **3 candidate names** for Dimension ", as.integer(dimension),
-      " (2-4 words each), derived from the variable patterns on both poles (based only on printed info, filtered at p <= ", format(proba), ").\n",
-      "2) For each candidate, give **one sentence** that justifies it using ONLY the printed associations (no new numbers).\n",
-      "3) Choose **ONE final name** (bold) and provide a **one-sentence definition** that is sign-agnostic.\n",
-      "4) *(Optional)* Provide **2 short archetypes** of individuals (left-pole / right-pole) as illustrations, without inventing numbers.\n",
-      "5) Keep the explanation concise and domain-appropriate. Do not compute anything new."
+    output_reqs <- switch(
+      profile$audience,
+      "beginner" = paste0(
+        "## Output requirements (BEGINNER)\n",
+        "1) Propose 2 candidate names for Dimension ", as.integer(dimension), " (2-4 words each), sign-agnostic.\n",
+        "2) For each candidate, give 1 short sentence using ONLY printed associations.\n",
+        "3) Choose ONE final name (bold) and give 1 short sign-agnostic definition.\n",
+        "4) If no variables pass the threshold, say 'inconclusive at this threshold' and stop.\n",
+        "5) Use short sentences; no new numbers or calculations."
+      ),
+      "applied" = paste0(
+        "## Output requirements (APPLIED)\n",
+        "1) Propose 3 candidate names for Dimension ", as.integer(dimension), " (2-4 words each), sign-agnostic.\n",
+        "2) For each candidate, give 1 practical sentence that justifies it using ONLY printed associations (prefer higher contribution and cos2 when printed).\n",
+        "3) Choose ONE final name (bold) and provide a one-sentence definition that is sign-agnostic.\n",
+        "4) Add one 'so what' sentence on how this axis can be used (e.g., segmentation, monitoring, communication).\n",
+        "5) If few variables pass the threshold, acknowledge the limitation; no new numbers."
+      ),
+      "advanced" = paste0(
+        "## Output requirements (ADVANCED)\n",
+        "1) Propose 3 candidate names for Dimension ", as.integer(dimension), " (2-4 words), sign-agnostic and driven by the dominant loading/correlation pattern.\n",
+        "2) Justify each name in 1 sentence referencing ONLY printed info (e.g., contributions, cos2, correlation signs) and, when printed, the dimension variance explained.\n",
+        "3) Choose ONE final name (bold) and provide a compact definition; note any observed coherence between variables on each pole.\n",
+        "4) Optionally add 1 brief stability remark (sensitivity to threshold/sample) without new computations.\n",
+        "5) Do not reconstruct unprinted values; no new calculations."
+      )
     )
   }
 

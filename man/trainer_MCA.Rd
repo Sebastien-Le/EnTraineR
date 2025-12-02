@@ -47,9 +47,8 @@ If \code{generate = FALSE}, a character prompt string.
 Builds an English-only, audience-tailored prompt to name and justify a
 Multiple Correspondence Analysis (MCA) dimension from a FactoMineR::MCA
 object. The function never invents numbers: it passes verbatim excerpts from
-\code{summary(mca_obj)} (categories, eta^2, supplementary parts) and
-\code{FactoMineR::dimdesc()} filtered at significance threshold \code{proba},
-then instructs how to read and name the axis.
+\code{summary(mca_obj)} and \code{FactoMineR::dimdesc()} filtered at a given
+significance threshold \code{proba}, and instructs how to read and name the axis.
 }
 \examples{
 \dontrun{
@@ -61,10 +60,16 @@ if (requireNamespace("FactoMineR", quietly = TRUE)) {
   intro <- "A survey on tea consumption practices and contexts was summarized by MCA."
   intro <- gsub("\n", " ", intro); intro <- gsub("\\\\s+", " ", intro)
 
-  pr <- trainer_MCA(res_mca, dimension = 1, proba = 0.01,
-                    introduction = intro, audience = "applied",
-                    generate = FALSE)
-  cat(pr)
+  # Applied audience
+  prompt <- trainer_MCA(res_mca,
+                        dimension = 1,
+                        proba = 0.01,
+                        introduction = intro,
+                        audience = "applied",
+                        generate = FALSE)
+  cat(prompt)
+
+  res <- gemini_generate(prompt, compile_to = "html")
 }
 }
 }

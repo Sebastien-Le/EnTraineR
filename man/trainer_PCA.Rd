@@ -54,20 +54,25 @@ significance threshold `proba`, and instructs how to read and name the axis.
 \dontrun{
 # Example: decathlon (FactoMineR)
 if (requireNamespace("FactoMineR", quietly = TRUE)) {
-  data(decathlon, package = "FactoMineR")
-  res_pca <- FactoMineR::PCA(decathlon,
-                             quanti.sup = 11:12,
-                             quali.sup  = 13,
-                             graph = FALSE)
+data(decathlon, package = "FactoMineR")
 
-  intro <- "A study was conducted on decathlon athletes.
-  Performances on each event were measured and summarized by PCA."
-  intro <- gsub("\n", " ", intro); intro <- gsub("\\\\s+", " ", intro)
+res_pca <- FactoMineR::PCA(decathlon,
+                quanti.sup = 11:12,
+                quali.sup = 13,
+                graph = FALSE)
 
-  pr <- trainer_PCA(res_pca, dimension = 1, proba = 0.05,
-                    introduction = intro, audience = "applied",
-                    generate = FALSE)
-  cat(pr)
+intro <- "A study was conducted on decathlon athletes.
+Performances on each event were measured and summarized by PCA."
+intro <- gsub("\n", " ", intro); intro <- gsub("\\\\s+", " ", intro)
+
+prompt <- trainer_PCA(res_pca,
+                dimension = 1,
+                proba = 0.05,
+                introduction = intro,
+                audience = "applied",
+                generate = FALSE)
+
+cat(prompt)
 }
 }
 }

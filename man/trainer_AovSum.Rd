@@ -17,57 +17,57 @@ trainer_AovSum(
 }
 \arguments{
 \item{aovsum_obj}{An object whose printed output contains sections named
-"Ftest" and "Ttest" (e.g., FactoMineR::AovSum).}
+"Ftest" and "Ttest" (e.g., \code{FactoMineR::AovSum()}).}
 
 \item{introduction}{Optional character context paragraph for the analysis.
 Defaults to a generic description.}
 
-\item{alpha}{Numeric significance level used as an instruction for the LLM
-(no computation is performed by this function). Default 0.05.}
+\item{alpha}{Numeric significance level used as an instruction for the LLM.
+Default 0.05.}
 
 \item{t_test}{Optional character vector to filter the T-test section by
-factor names and/or interactions expressed as "A:B".}
+factor names and/or interactions (e.g. "Factor A" or "Factor A:Factor B").}
 
 \item{audience}{Target audience, one of c("beginner","applied","advanced").}
 
-\item{summary_only}{Logical; if TRUE, return a 3-bullet executive summary
-regardless of audience depth (uses trainer_core_summary_only_block()).}
+\item{summary_only}{Logical; if TRUE, return a compact 3-bullet executive summary.}
 
 \item{llm_model}{Character model name for the generator (e.g., "llama3").}
 
-\item{generate}{Logical; if TRUE, calls trainer_core_generate_or_return()
-and returns a list with prompt and response. If FALSE, returns the prompt.}
+\item{generate}{Logical; if TRUE, calls trainer_core_generate_or_return().}
 }
 \value{
-Character prompt (if generate = FALSE) or a list with
-  prompt, response, and model.
+Character prompt (if generate = FALSE) or a list.
 }
 \description{
 Builds an English-only, audience-tailored prompt to interpret an ANOVA
-produced by FactoMineR::AovSum (or a similar object that prints
-"Ftest" and "Ttest" sections). The function never invents numbers:
-it only passes verbatim output to the LLM and instructs how to interpret it.
+produced by FactoMineR::AovSum. The function never invents numbers:
+it only passes verbatim excerpts to the LLM and instructs how to interpret
+deviations (sum-to-zero coding) as performance drivers.
 }
 \examples{
 \dontrun{
 # Example 1: SensoMineR chocolates (requires SensoMineR)
 if (requireNamespace("SensoMineR", quietly = TRUE)) {
-  # Load data from SensoMineR
-  data("chocolates", package = "SensoMineR")
-  # ANOVA summary with Product and Panelist
-  res <- FactoMineR::AovSum(Granular ~ Product * Panelist, data = sensochoc)
+# Load data from SensoMineR
+data("chocolates", package = "SensoMineR")
+# ANOVA summary with Product and Panelist
+res <- FactoMineR::AovSum(Granular ~ Product * Panelist, data = sensochoc)
 
-  intro <- "Six chocolates have been evaluated by a sensory panel,
-  during two days, according to a sensory attribute: granular.
-  The panel has been trained according to this attribute
-  and panellists should be reproducible when rating this attribute."
-  intro <- gsub("\n", " ", intro)
-  intro <- stringr::str_squish(intro)
+intro <- "Six chocolates have been evaluated by a sensory panel,
+during two days, according to a sensory attribute: granular.
+The panel has been trained according to this attribute
+and panellists should be reproducible when rating this attribute."
+intro <- gsub("\n", " ", intro)
+intro <- gsub("\\\\s+", " ", intro)
+cat(intro)
 
-  p <- trainer_AovSum(res, audience = "beginner",
-                      t_test = c("Product", "Panelist"),
-                      introduction = intro)
-  cat(p)
+prompt <- trainer_AovSum(res, audience = "beginner",
+                 t_test = c("Product", "Panelist"),
+                 introduction = intro)
+cat(prompt)
+
+res <- gemini_generate(prompt, compile_to = "html")
 }
 
 # Example 2: Poussin dataset (shipped with this package)
@@ -80,13 +80,18 @@ At that time, the sex of the chicks - a factor known beforehand to cause
 significant weight differences - could also be observed.
 The objective is to choose the treatment that maximizes chick weight."
 intro <- gsub("\n", " ", intro)
-intro <- stringr::str_squish(intro)
+intro <- gsub("\\\\s+", " ", intro)
+cat(intro)
 
 res <- FactoMineR::AovSum(Weight ~ Gender * Temperature, data = poussin)
-p <- trainer_AovSum(res,
-                    audience = "beginner",
-                    t_test = c("Gender", "Temperature"),
-                    introduction = intro)
-cat(p)
+
+prompt <- trainer_AovSum(res,
+                 audience = "beginner",
+                 t_test = c("Gender", "Temperature"),
+                 introduction = intro)
+cat(prompt)
+
+res <- gemini_generate(prompt, compile_to = "html")
 }
+
 }

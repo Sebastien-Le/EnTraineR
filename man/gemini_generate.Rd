@@ -8,7 +8,7 @@ gemini_generate(
   prompt,
   model = "gemini-2.5-flash",
   api_key = Sys.getenv("GEMINI_API_KEY"),
-  user_agent = "EnTraineR/0.9.0 (https://github.com/Sebastien-Le/EnTraineR)",
+  user_agent = NULL,
   base_url = "https://generativelanguage.googleapis.com/v1beta",
   temperature = NULL,
   top_p = NULL,
@@ -22,7 +22,9 @@ gemini_generate(
   verbose = FALSE,
   max_tries = 5,
   backoff_base = 0.8,
-  backoff_cap = 8
+  backoff_cap = 8,
+  force_markdown = TRUE,
+  compile_to = c("none", "html", "docx")
 )
 }
 \arguments{
@@ -31,63 +33,49 @@ gemini_generate(
 \item{model}{Character scalar. Gemini model id (e.g., "gemini-2.5-flash",
 "gemini-2.5-pro"). You may also pass "models/..." and it will be normalized.}
 
-\item{api_key}{Character scalar. API key. Defaults to env var
-`GEMINI_API_KEY`.}
+\item{api_key}{Character scalar. API key. Defaults to env var 'GEMINI_API_KEY'.}
 
-\item{user_agent}{Character scalar for the HTTP User-Agent header.
-Default: "EnTraineR/0.9.0 (https://github.com/Sebastien-Le/EnTraineR)".}
+\item{user_agent}{Character scalar. If NULL, a dynamic value is used.}
 
-\item{base_url}{Character scalar. API base URL.
-Default: "https://generativelanguage.googleapis.com/v1beta".}
+\item{base_url}{Character scalar. API base URL.}
 
-\item{temperature}{Optional numeric in [0, 2]. Sampling temperature.}
+\item{temperature}{Optional numeric in [0, 2].}
 
-\item{top_p}{Optional numeric in (0, 1]. Nucleus sampling.}
+\item{top_p}{Optional numeric in (0, 1].}
 
-\item{top_k}{Optional integer >= 1. Top-k sampling.}
+\item{top_k}{Optional integer >= 1.}
 
-\item{max_output_tokens}{Optional integer > 0. Maximum tokens in response.}
+\item{max_output_tokens}{Optional integer > 0.}
 
-\item{stop_sequences}{Optional character vector of stop strings.}
+\item{stop_sequences}{Optional character vector.}
 
-\item{system_instruction}{Optional character scalar with a system instruction.}
+\item{system_instruction}{Optional character scalar.}
 
-\item{safety_settings}{Optional list passed as-is to the API (advanced).}
+\item{safety_settings}{Optional list passed as-is to the API.}
 
-\item{seed}{Optional integer seed for deterministic sampling (where supported).}
+\item{seed}{Optional integer seed.}
 
-\item{timeout}{Numeric seconds for the HTTP request timeout (default 120).}
+\item{timeout}{Numeric seconds for request timeout (default 120).}
 
-\item{verbose}{Logical; if TRUE, prints the resolved URL and retry notices.}
+\item{verbose}{Logical; if TRUE, prints URL/retries.}
 
-\item{max_tries}{Integer. Maximum attempts per call (default 5).}
+\item{max_tries}{Integer. Max attempts (default 5).}
 
 \item{backoff_base}{Numeric. Initial backoff seconds (default 0.8).}
 
-\item{backoff_cap}{Numeric. Maximum backoff seconds (default 8).}
+\item{backoff_cap}{Numeric. Max backoff seconds (default 8).}
+
+\item{force_markdown}{Logical. If TRUE, instructs the model to answer in Markdown.}
+
+\item{compile_to}{Character scalar. One of c("none","html","docx").}
 }
 \value{
-Character scalar with the first candidate's text. If no text is
-returned, an informative error is thrown (finish reason or safety block).
+If compile_to = "none": character scalar (raw text as returned by the API).
+If compile_to = "html": list(markdown = <string>, html_path = <path>), and opens the HTML.
+If compile_to = "docx": list(markdown = <string>, docx_path = <path>), and opens the DOCX.
 }
 \description{
-Minimal wrapper around the Generative Language API
-`:generateContent` endpoint for text prompts, with retries,
-exponential backoff, and clearer errors.
-}
-\details{
-The function retries on common transient failures (network timeouts,
-HTTP 429, HTTP 5xx). Backoff is exponential with jitter and capped by
-`backoff_cap`. The first successful candidate's text is returned.
-}
-\examples{
-\dontrun{
-Sys.setenv(GEMINI_API_KEY = "YOUR_KEY")
-gemini_generate(
-  prompt = "Say hello in one short sentence.",
-  model  = "gemini-2.5-flash",
-  verbose = TRUE
-)
-}
-
+Minimal wrapper around the Generative Language API ':generateContent' endpoint
+for text prompts, with retries, exponential backoff, clearer errors, and
+optional output compilation (HTML/DOCX) with auto-open.
 }

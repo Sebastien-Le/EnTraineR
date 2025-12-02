@@ -2,7 +2,7 @@
 % Please edit documentation in R/trainer_t_test.R
 \name{trainer_t_test}
 \alias{trainer_t_test}
-\title{Interpret a Student's t-test (stats::t.test) with an audience-aware LLM prompt}
+\title{Interpret a Student's t-test (stats::t.test) with an LLM-ready prompt}
 \usage{
 trainer_t_test(
   tt_obj,
@@ -15,28 +15,27 @@ trainer_t_test(
 )
 }
 \arguments{
-\item{tt_obj}{An htest object returned by stats::t.test().}
+\item{tt_obj}{An htest object returned by \code{stats::t.test()}.}
 
 \item{introduction}{Optional character string giving the study context in plain English.}
 
 \item{alpha}{Numeric significance level used for interpretation (default 0.05).}
 
-\item{audience}{One of c("beginner","applied","advanced").}
+\item{audience}{One of \code{c("beginner","applied","advanced")}.}
 
-\item{summary_only}{Logical; if TRUE, return a 3-bullet executive summary
-regardless of audience depth (uses trainer_core_summary_only_block()).}
+\item{summary_only}{Logical; if TRUE, return a 3-bullet executive summary.}
 
 \item{llm_model}{Character; model name passed to your generator (default "llama3").}
 
-\item{generate}{Logical; if TRUE, call trainer_core_generate_or_return() and return prompt + response.}
+\item{generate}{Logical; if TRUE, call \code{trainer_core_generate_or_return()} and return prompt + response.}
 }
 \value{
-If generate = FALSE, returns the prompt string. If TRUE, returns a list with
-  prompt, response, and model.
+If \code{generate = FALSE}, the prompt string. Else a list with \code{prompt}, \code{response}, \code{model}.
 }
 \description{
-Builds a clear, audience-tailored prompt to interpret a base R stats::t.test() result.
-Uses TraineR core helpers to standardize phrasing and generation.
+Builds a clear, audience-tailored prompt to interpret a base R \code{stats::t.test()} result.
+Identifies the test flavor (One-sample, Two-sample, Paired, Welch) and instructs the LLM
+to use ONLY printed values (p, t, df, CI, estimates) and avoid any new calculations.
 }
 \examples{
 set.seed(1)
@@ -46,4 +45,5 @@ cat(trainer_t_test(tt1, audience = "beginner"))
 x <- rnorm(18, 0); y <- rnorm(20, 0.3)
 tt2 <- t.test(x, y, var.equal = FALSE)             # two-sample Welch
 cat(trainer_t_test(tt2, audience = "applied", summary_only = TRUE))
+
 }

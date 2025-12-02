@@ -1,7 +1,7 @@
 Package: EnTraineR
 Type: Package
 Title: Enhanced Teaching Assistant (AI) for Statistical Analysis
-Version: 0.9.0
+Version: 1.0.0
 Authors@R: person(
     given = 'Sébastien', 
     family = 'Lê', 
@@ -17,7 +17,10 @@ Imports:
     ollamar,
     httr2 (>= 1.0.0)
 Suggests:
-    FactoMineR
+    FactoMineR,
+    commonmark,
+    rmarkdown
+SystemRequirements: Pandoc (for DOCX/HTML conversion when using rmarkdown)
 RoxygenNote: 7.3.2
 Depends: 
     R (>= 3.5)

@@ -2,7 +2,8 @@
 % Please edit documentation in R/trainer_core.R
 \name{trainer_core_detect_main_factors}
 \alias{trainer_core_detect_main_factors}
-\title{Detect main-effect factor names present in T-test lines (ignore interactions)}
+\title{Detect main-effect factor names present in T-test lines (ignore interactions)
+Space-safe: captures everything before " - " on non-interaction rows.}
 \usage{
 trainer_core_detect_main_factors(tt_lines)
 }
@@ -14,7 +15,5 @@ Character vector of factor names.
 }
 \description{
 Detect main-effect factor names present in T-test lines (ignore interactions)
-}
-\examples{
-trainer_core_detect_main_factors(c("A - a", "B - b:C - c"))
+Space-safe: captures everything before " - " on non-interaction rows.
 }

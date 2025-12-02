@@ -3,9 +3,8 @@
 #' Builds an English-only, audience-tailored prompt to name and justify a
 #' Multiple Correspondence Analysis (MCA) dimension from a FactoMineR::MCA
 #' object. The function never invents numbers: it passes verbatim excerpts from
-#' \code{summary(mca_obj)} (categories, eta^2, supplementary parts) and
-#' \code{FactoMineR::dimdesc()} filtered at significance threshold \code{proba},
-#' then instructs how to read and name the axis.
+#' \code{summary(mca_obj)} and \code{FactoMineR::dimdesc()} filtered at a given
+#' significance threshold \code{proba}, and instructs how to read and name the axis.
 #'
 #' @param mca_obj A MCA object returned by \code{FactoMineR::MCA()}.
 #' @param dimension Integer scalar; the dimension (component) to name (default 1).
@@ -37,10 +36,16 @@
 #'   intro <- "A survey on tea consumption practices and contexts was summarized by MCA."
 #'   intro <- gsub("\n", " ", intro); intro <- gsub("\\s+", " ", intro)
 #'
-#'   pr <- trainer_MCA(res_mca, dimension = 1, proba = 0.01,
-#'                     introduction = intro, audience = "applied",
-#'                     generate = FALSE)
-#'   cat(pr)
+#'   # Applied audience
+#'   prompt <- trainer_MCA(res_mca,
+#'                         dimension = 1,
+#'                         proba = 0.01,
+#'                         introduction = intro,
+#'                         audience = "applied",
+#'                         generate = FALSE)
+#'   cat(prompt)
+#'
+#'   res <- gemini_generate(prompt, compile_to = "html")
 #' }
 #' }
 trainer_MCA <- function(mca_obj,
@@ -60,8 +65,7 @@ trainer_MCA <- function(mca_obj,
   if (!is.numeric(proba) || length(proba) != 1L || is.na(proba) || proba <= 0 || proba > 1)
     stop("proba must be a single numeric value in (0, 1].")
 
-  # ---- Audience profile & header --------------------------------------------
-  # We pass 'alpha = proba' in the profile to keep the same vocabulary
+  # ---- Core audience profile & header ---------------------------------------
   profile <- trainer_core_audience_profile(audience, alpha = proba,
                                            summary_only = summary_only)
   header  <- trainer_core_prompt_header(profile)
@@ -70,8 +74,8 @@ trainer_MCA <- function(mca_obj,
   if (is.null(introduction) || !nzchar(introduction)) {
     introduction <- paste0(
       "We aim to name one Multiple Correspondence Analysis (MCA) dimension. ",
-      "Provide a short, sign-agnostic name and justify it from the printed outputs only. ",
-      "dimdesc is filtered at p <= ", format(proba), "."
+      "The goal is to provide a short, sign-agnostic name and a concise justification based on printed outputs. ",
+      "dimdesc is filtered at significance threshold p <= ", format(proba), "."
     )
   }
 
@@ -79,103 +83,70 @@ trainer_MCA <- function(mca_obj,
   sum_txt   <- trainer_core_capture(summary(mca_obj))
   sum_lines <- unlist(strsplit(sum_txt, "\n", fixed = TRUE), use.names = FALSE)
 
-  extract_section <- function(lines, start_pat, stop_pats) {
-    i <- which(grepl(start_pat, lines, perl = TRUE))
-    if (!length(i)) return(character(0))
-    start <- i[1]
-    stop_idx <- length(lines) + 1L
-    for (sp in stop_pats) {
-      j_all <- which(grepl(sp, lines, perl = TRUE))
-      j <- j_all[j_all > start]
-      if (length(j)) stop_idx <- min(stop_idx, j[1])
-    }
-    out <- lines[start:(stop_idx - 1L)]
-    while (length(out) && grepl("^\\s*$", out[length(out)])) out <- out[-length(out)]
-    out
-  }
-
-  # Pick MCA-relevant blocks commonly printed by summary()
-  cats_block <- extract_section(
+  # Use centralized extraction helper
+  cats_block <- trainer_core_extract_section(
     sum_lines,
     start_pat = "^\\s*Categories\\b",
-    stop_pats = c("^\\s*Categorical variables \\(eta2\\)\\b",
-                  "^\\s*Supplementary\\b",
-                  "^\\s*$")
+    stop_pats = c("^\\s*Categorical variables \\(eta2\\)\\b", "^\\s*Supplementary\\b", "^\\s*$")
   )
-  eta_block <- extract_section(
+  eta_block <- trainer_core_extract_section(
     sum_lines,
     start_pat = "^\\s*Categorical variables \\(eta2\\)\\b",
-    stop_pats = c("^\\s*Supplementary categories\\b",
-                  "^\\s*Supplementary categorical variables \\(eta2\\)\\b",
-                  "^\\s*Supplementary continuous variable\\b",
-                  "^\\s*$")
+    stop_pats = c("^\\s*Supplementary\\b", "^\\s*$")
   )
-  supp_cat_block <- extract_section(
+  supp_block <- trainer_core_extract_section(
     sum_lines,
-    start_pat = "^\\s*Supplementary categories\\b",
-    stop_pats = c("^\\s*Supplementary categorical variables \\(eta2\\)\\b",
-                  "^\\s*Supplementary continuous variable\\b",
-                  "^\\s*$")
-  )
-  supp_eta_block <- extract_section(
-    sum_lines,
-    start_pat = "^\\s*Supplementary categorical variables \\(eta2\\)\\b",
-    stop_pats = c("^\\s*Supplementary continuous variable\\b", "^\\s*$")
-  )
-  supp_cont_block <- extract_section(
-    sum_lines,
-    start_pat = "^\\s*Supplementary continuous variable\\b",
+    start_pat = "^\\s*Supplementary",
     stop_pats = c("^\\s*$")
   )
 
-  # ---- Capture verbatim: dimdesc() with proba --------------------------------
+  # ---- Capture verbatim: dimdesc() with proba -------------------------------
   dd <- try(FactoMineR::dimdesc(mca_obj, axes = dimension, proba = proba), silent = TRUE)
   dd_block <- character(0)
   if (!inherits(dd, "try-error")) {
-    # MCA dimdesc uses backtick style names or "Dim X"
     dim_keys <- names(dd)
-    # Accept "Dim 1", "Dim.1", or similar
-    target <- paste0("Dim", if (grepl("^\\d+$", as.character(dimension))) " " else ".", as.integer(dimension))
-    # Find a key that matches either "Dim 1" or "Dim.1"
-    key_idx <- which(dim_keys %in% c(paste0("Dim ", as.integer(dimension)),
-                                     paste0("Dim.", as.integer(dimension))))
+    target_regex <- paste0("^Dim[\\. ]?", as.integer(dimension), "$")
+    key_idx <- which(grepl(target_regex, dim_keys))
+
     if (length(key_idx)) {
       dd_block <- trainer_core_capture(dd[[ key_idx[1] ]])
     } else {
-      # Fallback: print entire dimdesc object (will include all dims)
       dd_block <- trainer_core_capture(dd)
     }
   }
 
-  # ---- How-to-read block (audience-specific) ---------------------------------
-  # MCA specifics: eta^2 (share of variance of the dimension explained by a categorical variable),
-  # categories' v.test/Estimate indicate the pole and strength; orientation is arbitrary.
+  # ---- How-to-read block (audience-specific) --------------------------------
+  # IMPROVED: Explicitly define the "Latent Variable/Profile" concept + Estimate signs
   howto_block <- switch(
     profile$audience,
     "beginner" = paste(
       "### How to read (MCA dimension naming)",
-      "- Name the axis from the *categories* that load on its two opposite poles.",
-      "- Orientation is arbitrary: pick a sign-agnostic name that still makes sense if reversed.",
-      paste0("- dimdesc is filtered at p <= ", format(proba), "; use only printed associations."),
-      "- eta^2 indicates how much of the dimension is explained by a categorical variable.",
-      "- Do not compute anything new; rely only on printed outputs.",
+      "- Think of this axis as a **hidden 'profile'** that separates respondents.",
+      "- **Check the sign of the 'Estimate'**: positive values represent one profile, negative values represent the opposite profile.",
+      "- Name the **theme** that opposes these two profiles (e.g., 'Modern vs Traditional').",
+      paste0("- Variables in dimdesc are filtered at p <= ", format(proba), ". If none pass, say: 'inconclusive at this threshold'."),
+      "- eta^2 indicates how much a variable explains the dimension (global link).",
+      "- Use very short sentences (<= 15 words). No new calculations.",
       sep = "\n"
     ),
     "applied" = paste(
       "### How to read (MCA dimension naming)",
-      "- Derive a concise label from coherent groups of categories at each pole.",
-      "- Keep the name sign-agnostic (works if the axis is flipped).",
-      paste0("- Use dimdesc (p <= ", format(proba), ") and, if helpful, the highest eta^2 variables as umbrellas."),
-      "- Supplementary variables/categories can illustrate patterns (do not drive the name).",
-      "- No new calculations; printed info only.",
+      "- Name the **synthetic behavioral pattern** (latent factor) that organizes the data.",
+      "- **Identify the opposition**: Contrast the 'profile' defined by categories with positive Estimates vs. those with negative Estimates.",
+      "- Find the common thread that links categories on the same pole.",
+      paste0("- Use dimdesc (p <= ", format(proba), "); prefer variables with high eta^2 (link strength)."),
+      "- Add one 'so what' sentence on how this axis can be used.",
+      "- No new calculations; use only printed material.",
       sep = "\n"
     ),
     "advanced" = paste(
       "### How to read (MCA dimension naming)",
-      "- Emphasize the dominant categorical structures (eta^2) and the most characteristic categories (v.test/Estimate signs).",
-      "- Provide a sign-agnostic name; mention pole tendencies without inventing magnitudes.",
-      paste0("- Respect the stated threshold in dimdesc (p <= ", format(proba), "); no inference beyond prints."),
-      "- Supplementary (continuous/qualitative) variables may serve as archetypal illustrations only.",
+      "- Conceptualize the dimension as a **latent categorical construct** explaining the inertia.",
+      "- **Interpret the structural opposition** between the centroids of categories with positive vs. negative Estimates.",
+      "- Ensure the label is sign-agnostic (orientation-free).",
+      paste0("- Interpret dimdesc under p <= ", format(proba), "; prioritize variables with higher discrimination measures."),
+      "- You may add a brief stability note (sensitivity to threshold/sample), without new computations.",
+      "- Supplementary elements should be cited as archetypes only.",
       sep = "\n"
     )
   )
@@ -188,14 +159,32 @@ trainer_MCA <- function(mca_obj,
       label = paste0("MCA Dimension ", as.integer(dimension), " (naming)")
     )
   } else {
-    output_reqs <- paste0(
-      "## Output requirements (", toupper(profile$audience), ")\n",
-      "1) Propose **3 candidate names** for Dimension ", as.integer(dimension),
-      " (2-4 words each), based on categories at both poles and high-eta^2 variables (printed only).\n",
-      "2) For each candidate, add **one sentence** justifying it using the printed categories/variables (no new numbers).\n",
-      "3) Choose **ONE final name** (bold) and provide a **one-sentence definition** that is sign-agnostic.\n",
-      "4) *(Optional)* Provide **2 brief pole archetypes** (left/right) with only printed hints (no invented magnitudes).\n",
-      "5) Keep it concise and domain-appropriate; do not compute anything new."
+    output_reqs <- switch(
+      profile$audience,
+      "beginner" = paste0(
+        "## Output requirements (BEGINNER)\n",
+        "1) Propose 2 candidate names for Dimension ", as.integer(dimension), " (2-4 words each), sign-agnostic.\n",
+        "2) For each candidate, give 1 short sentence using ONLY printed categories.\n",
+        "3) Choose ONE final name (bold) and give 1 short sign-agnostic definition.\n",
+        "4) If no variables pass the threshold, say 'inconclusive at this threshold' and stop.\n",
+        "5) Use short sentences; no new numbers or calculations."
+      ),
+      "applied" = paste0(
+        "## Output requirements (APPLIED)\n",
+        "1) Propose 3 candidate names for Dimension ", as.integer(dimension), " (2-4 words each), sign-agnostic.\n",
+        "2) For each candidate, give 1 practical sentence that justifies it by synthesizing the opposition between positive/negative Estimates.\n",
+        "3) Choose ONE final name (bold) and provide a one-sentence definition that is sign-agnostic.\n",
+        "4) Add one 'so what' sentence on how this axis can be used (e.g., segmentation, profiling).\n",
+        "5) If few variables pass the threshold, acknowledge the limitation; no new numbers."
+      ),
+      "advanced" = paste0(
+        "## Output requirements (ADVANCED)\n",
+        "1) Propose 3 candidate names for Dimension ", as.integer(dimension), " (2-4 words), sign-agnostic and driven by the dominant latent structure (eta^2/categories).\n",
+        "2) Justify each name in 1 sentence referencing ONLY printed info and, when printed, the dimension variance explained.\n",
+        "3) Choose ONE final name (bold) and provide a compact definition; note any observed coherence between categories on each pole.\n",
+        "4) Optionally add 1 brief stability remark (sensitivity to threshold/sample) without new computations.\n",
+        "5) Do not reconstruct unprinted values; no new calculations."
+      )
     )
   }
 
@@ -210,21 +199,18 @@ trainer_MCA <- function(mca_obj,
     paste0(dd_title, "\n(not available)")
   }
 
-  # Build summary chunk with typical MCA blocks if available
-  sum_parts <- c(
-    if (length(cats_block))       paste0("#### Categories\n```\n",       paste(cats_block,       collapse = "\n"), "\n```") else NULL,
-    if (length(eta_block))        paste0("#### Categorical variables (eta^2)\n```\n", paste(eta_block, collapse = "\n"), "\n```") else NULL,
-    if (length(supp_cat_block))   paste0("#### Supplementary categories\n```\n",   paste(supp_cat_block,   collapse = "\n"), "\n```") else NULL,
-    if (length(supp_eta_block))   paste0("#### Supplementary categorical variables (eta^2)\n```\n", paste(supp_eta_block, collapse = "\n"), "\n```") else NULL,
-    if (length(supp_cont_block))  paste0("#### Supplementary continuous variable(s)\n```\n", paste(supp_cont_block, collapse = "\n"), "\n```") else NULL
+  sum_chunk <- paste(
+    sum_title,
+    if (length(cats_block)) paste0("#### Categories\n```\n", paste(cats_block, collapse = "\n"), "\n```") else "#### Categories\n(not available)",
+    if (length(eta_block))  paste0("#### Categorical variables (eta^2)\n```\n", paste(eta_block, collapse = "\n"), "\n```") else "#### Categorical variables (eta^2)\n(not available)",
+    if (length(supp_block)) paste0("#### Supplementary\n```\n", paste(supp_block, collapse = "\n"), "\n```") else NULL,
+    sep = "\n\n"
   )
-  sum_chunk <- paste(c(sum_title, sum_parts), collapse = "\n\n")
-  if (!nzchar(sum_chunk)) sum_chunk <- paste(sum_title, "(not available)", sep = "\n")
 
   setup <- paste(
     paste0("- Target dimension: Dim. ", as.integer(dimension), "."),
-    paste0("- dimdesc significance threshold: p <= ", format(proba), "."),
-    "- Use categories at both poles; eta^2 highlights umbrella variables (share of dimension variance).",
+    paste0("- Significance threshold for dimdesc: p <= ", format(proba), "."),
+    "- Use categories to characterize both poles; eta^2 indicates variable strength.",
     "",
     howto_block,
     "",
