@@ -1,6 +1,6 @@
 # helper (internal)
-.default_user_agent <- function(pkg = "EnTraineR",
-                                url = "https://github.com/Sebastien-Le/EnTraineR") {
+.default_user_agent <- function(pkg = "EntraineR",
+                                url = "https://github.com/Sebastien-Le/EntraineR") {
   ver_pkg  <- tryCatch(as.character(utils::packageVersion(pkg)), error = function(e) "0.0.0")
   ver_r    <- as.character(getRversion())
   ver_httr <- tryCatch(as.character(utils::packageVersion("httr2")), error = function(e) NA_character_)
@@ -14,16 +14,18 @@
 # helper (internal) to open files cross-platform
 .open_file <- function(path) {
   path <- normalizePath(path, winslash = "/", mustWork = FALSE)
+
   if (.Platform$OS.type == "windows") {
     shell.exec(path)
   } else {
     sysname <- Sys.info()[["sysname"]]
     if (identical(sysname, "Darwin")) {
-      system2("open", shQuote(path), wait = FALSE)
+      system2("open", path, wait = FALSE)
     } else {
-      system2("xdg-open", shQuote(path), wait = FALSE)
+      system2("xdg-open", path, wait = FALSE)
     }
   }
+
   invisible(TRUE)
 }
 
@@ -32,7 +34,7 @@
 #' @description
 #' Minimal wrapper around the Generative Language API ':generateContent' endpoint
 #' for text prompts, with retries, exponential backoff, clearer errors, and
-#' optional output compilation (HTML/DOCX) with auto-open.
+#' optional output compilation (HTML/DOCX). Files are opened only when `open = TRUE`.
 #'
 #' @param prompt Character scalar. The user prompt (plain text).
 #' @param model Character scalar. Gemini model id (e.g., "gemini-2.5-flash",
@@ -55,11 +57,18 @@
 #' @param backoff_cap Numeric. Max backoff seconds (default 8).
 #' @param force_markdown Logical. If TRUE, instructs the model to answer in Markdown.
 #' @param compile_to Character scalar. One of c("none","html","docx").
+#' @param output_path Optional character scalar. Destination file for HTML/DOCX output.
+#'   If NULL, a temporary file is created.
+#' @param open Logical; if TRUE, open the generated HTML/DOCX file. Defaults to
+#'   `interactive()`.
 #'
-#' @return
-#' If compile_to = "none": character scalar (raw text as returned by the API).
-#' If compile_to = "html": list(markdown = <string>, html_path = <path>), and opens the HTML.
-#' If compile_to = "docx": list(markdown = <string>, docx_path = <path>), and opens the DOCX.
+#' @return An object of class `entrainer_response` with a stable structure.
+#'   The generated text is available in `$text`/`$markdown`; `html_path` or
+#'   `docx_path` are populated when `compile_to` is `"html"` or `"docx"`.
+#'
+#' @section Privacy:
+#' This function sends `prompt` to the Google Generative Language API. Do not
+#' include confidential data unless this is intended and allowed in your context.
 #'
 #' @importFrom httr2 request req_url_query req_user_agent req_headers
 #' @importFrom httr2 req_body_json req_perform resp_body_json req_timeout
@@ -86,25 +95,82 @@ gemini_generate <- function(
     backoff_base = 0.8,
     backoff_cap  = 8,
     force_markdown = TRUE,
-    compile_to = c("none", "html", "docx")
+    compile_to = c("none", "html", "docx"),
+    output_path = NULL,
+    open = interactive()
 ) {
   compile_to <- match.arg(compile_to)
 
   # ---- Guardrails ------------------------------------------------------------
-  if (!nzchar(api_key)) {
-    stop("Set GEMINI_API_KEY env var first, e.g. Sys.setenv(GEMINI_API_KEY = 'YOUR_KEY')")
+  prompt <- trainer_core_check_string(prompt, "prompt")
+  model <- trainer_core_check_string(model, "model")
+  api_key <- trainer_core_check_string(api_key, "api_key")
+  base_url <- trainer_core_check_string(base_url, "base_url")
+  force_markdown <- trainer_core_check_flag(force_markdown, "force_markdown")
+  verbose <- trainer_core_check_flag(verbose, "verbose")
+  open <- trainer_core_check_flag(open, "open")
+  timeout <- trainer_core_check_number(timeout, "timeout", lower = 0, include_lower = FALSE)
+  max_tries <- trainer_core_check_positive_integer(max_tries, "max_tries")
+  backoff_base <- trainer_core_check_number(backoff_base, "backoff_base", lower = 0, include_lower = FALSE)
+  backoff_cap <- trainer_core_check_number(backoff_cap, "backoff_cap", lower = 0, include_lower = FALSE)
+
+  if (!is.null(temperature)) {
+    temperature <- trainer_core_check_number(temperature, "temperature", lower = 0, upper = 2)
   }
-  if (length(prompt) != 1L || !nzchar(prompt)) {
-    stop("`prompt` must be a non-empty character scalar.")
+  if (!is.null(top_p)) {
+    top_p <- trainer_core_check_probability(top_p, "top_p", include_upper = TRUE)
+  }
+  if (!is.null(top_k)) {
+    top_k <- trainer_core_check_positive_integer(top_k, "top_k")
+  }
+  if (!is.null(max_output_tokens)) {
+    max_output_tokens <- trainer_core_check_positive_integer(max_output_tokens, "max_output_tokens")
+  }
+  if (!is.null(seed)) {
+    seed <- trainer_core_check_positive_integer(seed, "seed")
+  }
+  if (!is.null(stop_sequences) && (!is.character(stop_sequences) || anyNA(stop_sequences))) {
+    stop("`stop_sequences` must be NULL or a character vector without missing values.", call. = FALSE)
+  }
+  system_instruction <- trainer_core_check_optional_string(system_instruction, "system_instruction")
+  user_agent <- trainer_core_check_optional_string(user_agent, "user_agent")
+  output_path <- trainer_core_check_optional_string(output_path, "output_path")
+
+  if (!is.null(output_path)) {
+    parent <- dirname(output_path)
+
+    if (!dir.exists(parent)) {
+      stop(
+        "The directory of `output_path` does not exist: ",
+        parent,
+        call. = FALSE
+      )
+    }
+
+    expected_ext <- switch(
+      compile_to,
+      html = ".html",
+      docx = ".docx",
+      none = NULL
+    )
+
+    if (!is.null(expected_ext) &&
+        !endsWith(tolower(output_path), expected_ext)) {
+      stop(
+        "`output_path` must end with `", expected_ext,
+        "` when `compile_to = \"", compile_to, "\"`.",
+        call. = FALSE
+      )
+    }
   }
 
   # Normalize model id
   model_id <- sub("^models/", "", model)
 
   # Resolve User-Agent
-  if (is.null(user_agent) || !nzchar(user_agent)) {
-    ua_opt <- getOption("EnTraineR.user_agent", default = NA_character_)
-    user_agent <- if (is.na(ua_opt)) .default_user_agent() else ua_opt
+  if (is.null(user_agent)) {
+    ua_opt <- getOption("EntraineR.user_agent", default = NA_character_)
+    user_agent <- if (is.na(ua_opt) || !nzchar(ua_opt)) .default_user_agent() else ua_opt
   }
 
   # Strengthen Markdown instruction if requested
@@ -121,6 +187,10 @@ gemini_generate <- function(
   # Endpoint & Config
   url <- sprintf("%s/models/%s:generateContent", base_url, model_id)
   if (isTRUE(verbose)) message("POST ", url)
+
+  if (!is.null(stop_sequences)) {
+    stop_sequences <- as.list(stop_sequences)
+  }
 
   gen_cfg <- Filter(Negate(is.null), list(
     temperature     = temperature,
@@ -197,7 +267,14 @@ gemini_generate <- function(
 
       # --- Post-Processing & Compilation ---
       if (compile_to == "none") {
-        return(out)
+        return(new_entrainer_response(
+          text = out,
+          model = model,
+          engine = "gemini",
+          prompt = prompt,
+          compile_to = "none",
+          output_path = NULL
+        ))
       }
 
       md <- out
@@ -215,7 +292,7 @@ gemini_generate <- function(
           html_txt <- tryCatch(commonmark::markdown_html(md, extensions = TRUE), error = function(e) NULL)
         }
 
-        html_path <- tempfile(fileext = ".html")
+        html_path <- output_path %||% tempfile(fileext = ".html")
         if (!is.null(html_txt)) {
           con <- file(html_path, open = "wb", encoding = "UTF-8")
           writeLines(enc2utf8(html_txt), con, useBytes = TRUE)
@@ -233,9 +310,17 @@ gemini_generate <- function(
           }
         }
 
-        # Auto-open HTML
-        utils::browseURL(html_path)
-        return(list(markdown = md, html_path = html_path))
+        if (isTRUE(open)) {
+          utils::browseURL(html_path)
+        }
+        return(new_entrainer_response(
+          text = md,
+          model = model,
+          engine = "gemini",
+          prompt = prompt,
+          compile_to = "html",
+          output_path = html_path
+        ))
       }
 
       if (compile_to == "docx") {
@@ -244,7 +329,7 @@ gemini_generate <- function(
         }
 
         in_md    <- tempfile(fileext = ".md")
-        docx_path <- tempfile(fileext = ".docx")
+        docx_path <- output_path %||% tempfile(fileext = ".docx")
 
         con <- file(in_md, open = "wb", encoding = "UTF-8")
         writeLines(enc2utf8(md), con, useBytes = TRUE)
@@ -252,13 +337,28 @@ gemini_generate <- function(
 
         rmarkdown::pandoc_convert(in_md, to = "docx", output = docx_path)
 
-        # Auto-open DOCX (Word or default app)
-        .open_file(docx_path)
-        return(list(markdown = md, docx_path = docx_path))
+        if (isTRUE(open)) {
+          .open_file(docx_path)
+        }
+        return(new_entrainer_response(
+          text = md,
+          model = model,
+          engine = "gemini",
+          prompt = prompt,
+          compile_to = "docx",
+          output_path = docx_path
+        ))
       }
 
       # Should not be reached
-      return(out)
+      return(new_entrainer_response(
+        text = out,
+        model = model,
+        engine = "gemini",
+        prompt = prompt,
+        compile_to = "none",
+        output_path = NULL
+      ))
     }
 
     # --- Error Handling & Retry Logic ---
@@ -266,7 +366,9 @@ gemini_generate <- function(
     if (!is.null(last_err)) {
       if (grepl("Timeout was reached", last_err, fixed = TRUE)) retryable <- TRUE
       if (grepl("HTTP 429", last_err, fixed = TRUE)) retryable <- TRUE
-      if (grepl("HTTP 5\\d\\d", last_err)) retryable <- TRUE
+      if (grepl("HTTP 5[0-9][0-9]", last_err, perl = TRUE)) {
+        retryable <- TRUE
+      }
       if (grepl("Failed to perform HTTP request", last_err, fixed = TRUE)) retryable <- TRUE
     }
 

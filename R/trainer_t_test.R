@@ -10,9 +10,18 @@
 #' @param audience One of \code{c("beginner","applied","advanced")}.
 #' @param summary_only Logical; if TRUE, return a 3-bullet executive summary.
 #' @param llm_model Character; model name passed to your generator (default "llama3").
+#' @param llm_engine Character; backend engine: "ollama", "gemini", or "none".
+#' @param ... Passed to the selected LLM backend when `generate = TRUE`.
 #' @param generate Logical; if TRUE, call \code{trainer_core_generate_or_return()} and return prompt + response.
 #'
-#' @return If \code{generate = FALSE}, the prompt string. Else a list with \code{prompt}, \code{response}, \code{model}.
+#' @section Privacy:
+#' If `generate = TRUE` and `llm_engine` is not `"none"`, the prompt is sent
+#' to the selected LLM backend. With external providers such as Gemini, this may
+#' include excerpts of statistical outputs and user-provided context.
+#'
+#' @return An `entrainer_prompt` object. It behaves like a character string
+#'   for `cat()`/printing and stores LLM metadata and response as attributes
+#'   when `generate = TRUE`.
 #'
 #' @examples
 #' set.seed(1)
@@ -30,16 +39,18 @@ trainer_t_test <- function(tt_obj,
                            audience = c("beginner","applied","advanced"),
                            summary_only = FALSE,
                            llm_model = "llama3",
-                           generate = FALSE) {
+                           generate = FALSE,
+                           llm_engine = c("ollama", "gemini", "none"),
+                           ...) {
 
   audience <- match.arg(audience)
-  if (is.null(tt_obj) || !inherits(tt_obj, "htest"))
-    stop("tt_obj must be an 'htest' object from base R stats::t.test().")
-
-  # --- alpha sanity (soft) ----------------------------------------------------
-  if (!is.numeric(alpha) || length(alpha) != 1L || is.na(alpha) || alpha <= 0 || alpha >= 1) {
-    alpha <- 0.05
-  }
+  alpha <- trainer_core_check_probability(alpha, "alpha")
+  summary_only <- trainer_core_check_flag(summary_only, "summary_only")
+  generate <- trainer_core_check_flag(generate, "generate")
+  llm_model <- trainer_core_check_string(llm_model, "llm_model")
+  llm_engine <- match.arg(llm_engine)
+  introduction <- trainer_core_check_optional_string(introduction, "introduction")
+  trainer_core_check_htest(tt_obj, "tt_obj", "t-test|t test|Welch|Paired")
 
   # --- Capture verbatim output -----------------------------------------------
   tt_txt <- trainer_core_capture(tt_obj)
@@ -104,29 +115,27 @@ trainer_t_test <- function(tt_obj,
       profile$audience,
       "beginner" = paste0(
         "## Output requirements (BEGINNER)\n",
-        "- Say what is compared (e.g., Group A vs Group B or value vs ", null_text, ").\n",
-        "- Decision: significant or not at alpha = ", trainer_core_fmt_alpha(alpha), " (use printed p-value).\n",
-        "- Direction: who is higher (use printed estimates or the sign of the estimate of the difference when shown).\n",
-        "- Magnitude: describe in plain English using ONLY printed values (avoid new calculations).\n",
-        "- One-sentence wrap-up."
+        "1) **What was tested**: say what is compared (e.g., Group A vs Group B or value vs ", null_text, ").\n",
+        "2) **Evidence check**: name the test variant, printed p-value, and printed CI/estimate when available.\n",
+        "3) **Decision**: significant or not at alpha = ", trainer_core_fmt_alpha(alpha), " (use printed p-value only).\n",
+        "4) **Meaning**: state direction from printed estimates or the sign of the printed difference; if group order is unclear, say so.\n",
+        "5) **Boundary**: one sentence on what cannot be concluded from this output (for example causality or unprinted diagnostics)."
       ),
       "applied" = paste0(
         "## Output requirements (APPLIED)\n",
-        "- Report t", if (profile$include_df) "(df)" else "", ", p-value, and the decision at alpha = ",
-        trainer_core_fmt_alpha(alpha), ". Use scientific notation when printed.\n",
-        "- Quote the ", conf_lbl, " CI verbatim and state whether it includes the null (", null_text, ").\n",
-        "- Use printed estimates (group means or mean of differences). Do NOT compute unprinted differences.\n",
-        "- If Welch appears in the method, note unequal-variance robustness.\n",
-        "- End with a practical implication (short)."
+        "1) **Evidence used**: report t", if (profile$include_df) "(df)" else "", ", p-value, ", conf_lbl, " CI, and printed estimates exactly enough to justify the interpretation.\n",
+        "2) **Decision rule**: compare p to alpha = ", trainer_core_fmt_alpha(alpha), "; state whether the CI is compatible with the null (", null_text, ").\n",
+        "3) **Interpretation**: use printed estimates only; do NOT compute unprinted differences; respect the printed group/order direction.\n",
+        "4) **Assumption handling**: if Welch appears, note unequal-variance robustness; if paired, note within-pair comparison.\n",
+        "5) **Practical implication**: add one short implication only if it follows from the provided context; otherwise state what context is missing."
       ),
       "advanced" = paste0(
         "## Output requirements (ADVANCED)\n",
-        "- Report t", if (profile$include_df) "(df)" else "", ", p-value, and the ", conf_lbl, " CI; state the decision at alpha = ",
-        trainer_core_fmt_alpha(alpha), ".\n",
-        "- Interpret the effect using ONLY printed estimates; discuss CI width (precision) and compatibility with the null (", null_text, ").\n",
-        "- Note the exact variant (", flavor, ") and alternative (", alt_human, ").\n",
-        "- Mention assumption handling when applicable (Welch for heteroscedasticity, paired for within-subject correlation).\n",
-        "- Strictly avoid any calculation not present in the output."
+        "1) **Statistical evidence artifact**: variant = ", flavor, "; alternative = ", alt_human, "; report t", if (profile$include_df) "(df)" else "", ", p-value, ", conf_lbl, " CI, null (", null_text, "), and printed estimates.\n",
+        "2) **Decision**: apply alpha = ", trainer_core_fmt_alpha(alpha), "; discuss compatibility with the null and precision from the CI, without computing new values.\n",
+        "3) **Effect reading**: interpret direction and magnitude only from printed estimates and the printed order. If order is ambiguous, do not name a group direction.\n",
+        "4) **Assumptions / design**: mention Welch, paired structure, independence, and normality only as far as they are relevant; do not invent diagnostics.\n",
+        "5) **Unsupported claims**: explicitly avoid causality, unprinted effect sizes, and unprinted robustness checks."
       )
     )
   }
@@ -139,13 +148,15 @@ trainer_t_test <- function(tt_obj,
       "- **p-value**: smaller than alpha -> statistically significant.",
       "- **Estimates**: printed averages (or mean of differences).",
       "- **Confidence interval**: plausible range for the (difference in) mean.",
+      "- **Direction**: depends on the printed estimate/order; do not reverse it.",
       sep = "\n"
     ),
     "applied" = paste(
       "### How to read (t-test)",
       "- **p-value**: probability of getting a result this extreme if the null were true.",
-      "- **CI**: if it includes the null value, the result is not statistically significant at the stated level.",
-      "- **Welch**: robust to unequal variances; paired: controls for within-subject variability.",
+      "- **CI**: set of null values not rejected at level ", trainer_core_fmt_alpha(1 - conf_level), ".",
+      "- **Welch**: addresses unequal variances; paired: analyzes within-subject differences.",
+      "- **Practical importance** cannot be inferred from the p-value alone.",
       sep = "\n"
     ),
     "advanced" = paste(
@@ -153,6 +164,7 @@ trainer_t_test <- function(tt_obj,
       "- **Statistic**: t = (estimate - null) / SE; df from the printed output.",
       "- **CI**: set of null values not rejected at level ", trainer_core_fmt_alpha(1 - conf_level), ".",
       "- **Paired vs two-sample**: paired tests the mean of within-pair differences.",
+      "- Keep the interpretation order-consistent; do not add standardized effects unless printed.",
       sep = "\n"
     )
   )
@@ -180,5 +192,5 @@ trainer_t_test <- function(tt_obj,
     show_verbatim       = FALSE
   )
 
-  trainer_core_generate_or_return(prompt, llm_model, generate)
+  trainer_core_generate_or_return(prompt, llm_model = llm_model, generate = generate, llm_engine = llm_engine, ...)
 }

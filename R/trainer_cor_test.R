@@ -12,10 +12,18 @@
 #' @param summary_only Logical; if TRUE, return a 3-bullet executive summary
 #'   regardless of audience depth (uses trainer_core_summary_only_block()).
 #' @param llm_model Character; model name for the generator (default "llama3").
+#' @param llm_engine Character; backend engine: "ollama", "gemini", or "none".
+#' @param ... Passed to the selected LLM backend when `generate = TRUE`.
 #' @param generate Logical; if TRUE, call the generator and return prompt + response.
 #'
-#' @return If generate = FALSE, a prompt string. If TRUE, a list with
-#'   prompt, response, and model.
+#' @section Privacy:
+#' If `generate = TRUE` and `llm_engine` is not `"none"`, the prompt is sent
+#' to the selected LLM backend. With external providers such as Gemini, this may
+#' include excerpts of statistical outputs and user-provided context.
+#'
+#' @return An `entrainer_prompt` object. It behaves like a character string
+#'   for `cat()`/printing and stores LLM metadata and response as attributes
+#'   when `generate = TRUE`.
 #' @examples
 #' set.seed(1)
 #' x <- rnorm(30); y <- 0.5*x + rnorm(30, sd = 0.8)
@@ -28,11 +36,18 @@ trainer_cor_test <- function(ct_obj,
                              audience = c("beginner","applied","advanced"),
                              summary_only = FALSE,
                              llm_model = "llama3",
-                             generate = FALSE) {
+                             generate = FALSE,
+                             llm_engine = c("ollama", "gemini", "none"),
+                             ...) {
 
   audience <- match.arg(audience)
-  if (is.null(ct_obj) || !inherits(ct_obj, "htest"))
-    stop("ct_obj must be an 'htest' from base R cor.test().")
+  alpha <- trainer_core_check_probability(alpha, "alpha")
+  summary_only <- trainer_core_check_flag(summary_only, "summary_only")
+  generate <- trainer_core_check_flag(generate, "generate")
+  llm_model <- trainer_core_check_string(llm_model, "llm_model")
+  llm_engine <- match.arg(llm_engine)
+  introduction <- trainer_core_check_optional_string(introduction, "introduction")
+  trainer_core_check_htest(ct_obj, "ct_obj", "correlation|Pearson|Spearman|Kendall")
 
   # --- Audience profile & header ---------------------------------------------
   profile <- trainer_core_audience_profile(audience, alpha, summary_only = summary_only)
@@ -78,7 +93,8 @@ trainer_cor_test <- function(ct_obj,
       "- The test checks if two variables **tend to move together** (positive or negative).",
       "- The **p-value** tells how unusual the observed association would be if there were **no association**.",
       "- The **confidence interval** (when printed) shows plausible values for the correlation.",
-      "- **Correlation  different from causation**; describe association only.",
+      "- **Correlation is different from causation**; describe association only.",
+      "- Do not label the association weak/moderate/strong unless a convention is provided.",
       sep = "\n"
     ),
     "applied" = paste(
@@ -86,15 +102,15 @@ trainer_cor_test <- function(ct_obj,
       "- Report the estimate (r / rho / tau), the printed test statistic,",
       if (!is.na(conf_level)) paste0(" the ", conf_str, " CI,") else "",
       " p-value, and the decision vs alpha.",
-      "- Give a **practical reading** of direction and strength using printed values only.",
-      "- **Assumptions**: Pearson targets linear association and is sensitive to outliers; Spearman/Kendall are rank-based and robust to monotone changes.",
+      "- Give a **practical reading** of direction and magnitude using printed values only.",
+      "- **Assumptions**: Pearson targets linear association and is sensitive to outliers; Spearman/Kendall are rank-based measures of monotone association, not full diagnostic substitutes.",
       sep = "\n"
     ),
     "advanced" = paste(
       "### How to read (correlation tests)",
-      "- Pearson assumes approximate bivariate normality and linear relation; the CI is often via Fisher z (report only if printed).",
-      "- Spearman/Kendall rely on rank-based nulls (exact or asymptotic per implementation).",
-      "- Interpret **direction** and **magnitude** strictly from printed numbers; do not invent diagnostics.",
+      "- Pearson targets linear association; Spearman/Kendall target monotone/rank association.",
+      "- Pearson CI is often via Fisher z (report only if printed); rank tests use exact/asymptotic nulls as implemented.",
+      "- Interpret **direction** and **magnitude** strictly from printed numbers; do not invent diagnostics or causal claims.",
       sep = "\n"
     )
   )
@@ -131,8 +147,8 @@ trainer_cor_test <- function(ct_obj,
     meth_hint <- switch(
       method_label,
       "pearson"  = "Pearson correlation (linear association; CI reported if available)",
-      "spearman" = "Spearman rank correlation (monotonic association; robust to outliers)",
-      "kendall"  = "Kendall rank correlation (monotonic association; robust to outliers)",
+      "spearman" = "Spearman rank correlation (monotonic/rank association)",
+      "kendall"  = "Kendall rank correlation (monotonic/rank association)",
       if (nzchar(method_raw)) paste0(method_raw, " correlation") else "correlation test"
     )
 
@@ -140,30 +156,31 @@ trainer_cor_test <- function(ct_obj,
       profile$audience,
       "beginner" = paste0(
         "## Output requirements (BEGINNER)\n",
-        "- **What was tested**: do the two variables tend to rise/fall together?\n",
-        "- **Report**: correlation estimate (r / rho / tau), the printed statistic, p-value, and the ",
-        conf_str, " confidence interval if present.\n",
-        "- **Decision**: compare p to alpha = ", a, ".\n",
-        "- **Plain meaning**: say positive/negative and roughly how strong, using printed values only. **Correlation different from causation**.\n",
-        "- **Style**: short sentences; no new calculations."
+        "1) **What was tested**: do the two variables tend to rise/fall together?\n",
+        "2) **Evidence check**: report the correlation estimate (r / rho / tau), printed statistic, p-value, and ", conf_str, " confidence interval if present.\n",
+        "3) **Decision**: compare p to alpha = ", a, ".\n",
+        "4) **Plain meaning**: say positive/negative association using printed values only; do not classify strength unless a convention is provided.\n",
+        "5) **Boundary**: correlation is not causation; no new calculations or diagnostics."
       ),
       "applied" = paste0(
         "## Output requirements (APPLIED)\n",
-        "- **Test**: ", meth_hint, "; alternative: ", alt_text, ".\n",
-        "- **Report**: estimate (with printed name), printed statistic",
+        "1) **Evidence used**: ", meth_hint, "; alternative: ", alt_text, "; estimate (with printed name), printed statistic",
         if (!is.na(conf_level)) paste0(", ", conf_str, " CI") else "",
-        ", p, and decision at alpha = ", a, ".\n",
-        "- **Interpretation**: direction (more/less together) and practical strength; separate magnitude from significance.\n",
-        "- **Assumptions**: linearity/outliers for Pearson; rank tests are robust/monotone. Do not invent diagnostics.\n",
-        "- **Takeaway**: <=", profile$max_bullets, " bullets (<= ", profile$max_words_takeaway, " words)."
+        ", p, and alpha = ", a, ".\n",
+        "2) **Decision**: significant or not, using the printed p-value only.\n",
+        "3) **Interpretation**: direction and magnitude; separate magnitude from significance and avoid weak/moderate/strong labels unless a convention is supplied.\n",
+        "4) **Assumptions / limits**: Pearson = linear association; Spearman/Kendall = monotone/rank association; no invented diagnostics.\n",
+        "5) **Takeaway**: <=", profile$max_bullets, " bullets (<= ", profile$max_words_takeaway, " words), with no causal claim."
       ),
       "advanced" = paste0(
         "## Output requirements (ADVANCED)\n",
-        "- **Test**: ", meth_hint, "; alternative: ", alt_text, ". Include estimate, printed statistic",
+        "1) **Statistical evidence artifact**: ", meth_hint, "; alternative: ", alt_text, "; estimate, printed statistic",
         " (with df only if printed), p, alpha = ", a,
-        if (!is.na(conf_level)) paste0(", and ", conf_str, " CI (Pearson when available).") else ".", "\n",
-        "- **Nuance**: Pearson CI often via Fisher z (report only if printed). Spearman/Kendall rely on rank-based nulls; no new computations.\n",
-        "- **Takeaway**: <=", profile$max_bullets, " bullets (<= ", profile$max_words_takeaway, " words)."
+        if (!is.na(conf_level)) paste0(", and ", conf_str, " CI (when printed).") else ".", "\n",
+        "2) **Decision**: apply alpha and distinguish significance from effect magnitude.\n",
+        "3) **Construct reading**: Pearson = linear association; Spearman/Kendall = monotone/rank association; do not transfer assumptions across methods.\n",
+        "4) **Unsupported claims**: no causality, no outlier/linearity diagnostics unless printed, no standardized strength labels unless a convention is given.\n",
+        "5) **Takeaway**: <=", profile$max_bullets, " bullets (<= ", profile$max_words_takeaway, " words)."
       )
     )
   }
@@ -179,5 +196,5 @@ trainer_cor_test <- function(ct_obj,
   )
 
   # --- Return prompt or generate via LLM -------------------------------------
-  trainer_core_generate_or_return(prompt, llm_model = llm_model, generate = generate)
+  trainer_core_generate_or_return(prompt, llm_model = llm_model, generate = generate, llm_engine = llm_engine, ...)
 }

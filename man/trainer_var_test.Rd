@@ -11,7 +11,9 @@ trainer_var_test(
   audience = c("beginner", "applied", "advanced"),
   summary_only = FALSE,
   llm_model = "llama3",
-  generate = FALSE
+  generate = FALSE,
+  llm_engine = c("ollama", "gemini", "none"),
+  ...
 )
 }
 \arguments{
@@ -29,14 +31,26 @@ regardless of audience depth (uses trainer_core_summary_only_block()).}
 \item{llm_model}{Character; model name for the generator (default "llama3").}
 
 \item{generate}{Logical; if TRUE, call the generator and return prompt + response.}
+
+\item{llm_engine}{Character; backend engine: "ollama", "gemini", or "none".}
+
+\item{...}{Passed to the selected LLM backend when `generate = TRUE`.}
 }
 \value{
-If generate = FALSE, a prompt string. If TRUE, a list with
-  prompt, response, and model.
+An `entrainer_prompt` object. It behaves like a character string
+  for `cat()`/printing and stores LLM metadata and response as attributes
+  when `generate = TRUE`.
 }
 \description{
 Builds a clear, audience-tailored prompt to interpret a base R stats::var.test() result.
 }
+\section{Privacy}{
+
+If `generate = TRUE` and `llm_engine` is not `"none"`, the prompt is sent
+to the selected LLM backend. With external providers such as Gemini, this may
+include excerpts of statistical outputs and user-provided context.
+}
+
 \examples{
 set.seed(1)
 x <- rnorm(25, sd = 1.0); y <- rnorm(30, sd = 1.3)

@@ -11,7 +11,9 @@ trainer_chisq_test(
   audience = c("beginner", "applied", "advanced"),
   summary_only = FALSE,
   llm_model = "llama3",
-  generate = FALSE
+  generate = FALSE,
+  llm_engine = c("ollama", "gemini", "none"),
+  ...
 )
 }
 \arguments{
@@ -29,16 +31,28 @@ regardless of audience depth (uses trainer_core_summary_only_block()).}
 \item{llm_model}{Character; model name for the generator (default "llama3").}
 
 \item{generate}{Logical; if TRUE, call the generator and return prompt + response.}
+
+\item{llm_engine}{Character; backend engine: "ollama", "gemini", or "none".}
+
+\item{...}{Passed to the selected LLM backend when `generate = TRUE`.}
 }
 \value{
-If generate = FALSE, a prompt string. If TRUE, a list with
-  prompt, response, and model.
+An `entrainer_prompt` object. It behaves like a character string
+  for `cat()`/printing and stores LLM metadata and response as attributes
+  when `generate = TRUE`.
 }
 \description{
 Builds a clear, audience-tailored prompt to interpret base R stats::chisq.test()
 results, handling both goodness-of-fit and contingency-table tests.
-Aligned with other TraineR trainers: no invented numbers; audience-specific guidance.
+Aligned with other EntraineR trainers: no invented numbers; audience-specific guidance.
 }
+\section{Privacy}{
+
+If `generate = TRUE` and `llm_engine` is not `"none"`, the prompt is sent
+to the selected LLM backend. With external providers such as Gemini, this may
+include excerpts of statistical outputs and user-provided context.
+}
+
 \examples{
 # GOF
 set.seed(1); x <- c(18, 22, 20, 25, 15)

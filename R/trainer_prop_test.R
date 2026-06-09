@@ -3,7 +3,7 @@
 #' @description
 #' Builds a clear, audience-tailored prompt to interpret stats::prop.test() results
 #' (one-sample vs target p, two-sample equality, k-group equality, or k-group vs given p).
-#' Aligned with other TraineR trainers: no invented numbers; audience-specific guidance.
+#' Aligned with other EntraineR trainers: no invented numbers; audience-specific guidance.
 #'
 #' @param pt_obj An htest object returned by stats::prop.test().
 #' @param introduction Optional character string giving the study context.
@@ -12,10 +12,18 @@
 #' @param summary_only Logical; if TRUE, return a 3-bullet executive summary
 #'   regardless of audience depth (uses trainer_core_summary_only_block()).
 #' @param llm_model Character; model name for the generator (default "llama3").
+#' @param llm_engine Character; backend engine: "ollama", "gemini", or "none".
+#' @param ... Passed to the selected LLM backend when `generate = TRUE`.
 #' @param generate Logical; if TRUE, call the generator and return prompt + response.
 #'
-#' @return If generate = FALSE, a prompt string. If TRUE, a list with
-#'   prompt, response, and model.
+#' @section Privacy:
+#' If `generate = TRUE` and `llm_engine` is not `"none"`, the prompt is sent
+#' to the selected LLM backend. With external providers such as Gemini, this may
+#' include excerpts of statistical outputs and user-provided context.
+#'
+#' @return An `entrainer_prompt` object. It behaves like a character string
+#'   for `cat()`/printing and stores LLM metadata and response as attributes
+#'   when `generate = TRUE`.
 #'
 #' @examples
 #' # One-sample
@@ -32,11 +40,18 @@ trainer_prop_test <- function(pt_obj,
                               audience = c("beginner","applied","advanced"),
                               summary_only = FALSE,
                               llm_model = "llama3",
-                              generate = FALSE) {
+                              generate = FALSE,
+                              llm_engine = c("ollama", "gemini", "none"),
+                              ...) {
 
   audience <- match.arg(audience)
-  if (is.null(pt_obj) || !inherits(pt_obj, "htest"))
-    stop("pt_obj must be an 'htest' from base R prop.test().")
+  alpha <- trainer_core_check_probability(alpha, "alpha")
+  summary_only <- trainer_core_check_flag(summary_only, "summary_only")
+  generate <- trainer_core_check_flag(generate, "generate")
+  llm_model <- trainer_core_check_string(llm_model, "llm_model")
+  llm_engine <- match.arg(llm_engine)
+  introduction <- trainer_core_check_optional_string(introduction, "introduction")
+  trainer_core_check_htest(pt_obj, "pt_obj", "proportion|proportions|prop")
 
   # --- Audience profile & header ---------------------------------------------
   profile <- trainer_core_audience_profile(audience, alpha, summary_only = summary_only)
@@ -47,7 +62,7 @@ trainer_prop_test <- function(pt_obj,
 
   # --- Fields & branch detection ---------------------------------------------
   alternative <- pt_obj$alternative %||% ""
-  conf_level  <- pt_obj$conf.level %||% NA_real_
+  conf_level  <- attr(pt_obj$conf.int, "conf.level") %||% NA_real_
   data_name   <- pt_obj$data.name %||% ""
   method_line <- pt_obj$method %||%
     "Test for equal/target proportions (score/chi-squared; continuity correction may apply)"
@@ -127,14 +142,14 @@ trainer_prop_test <- function(pt_obj,
     "applied" = paste(
       "### How to read (proportion tests)",
       "- Report X^2 (df), **p**, and the ", conf_str, " CI when available (one- or two-sample).",
-      "- Translate results into **percentage-point** differences for practical meaning (using printed values only).",
+      "- Describe practical magnitude from printed proportions/CI only; do not compute percentage-point differences unless they are printed.",
       if (has_yates) "- For 2x2, a **continuity correction** may be applied (as printed)." else "- Large-sample approximation; continuity correction may apply for 2x2.",
       "- For sparse counts, consider exact methods (do not compute here).",
       sep = "\n"
     ),
     "advanced" = paste(
       "### How to read (proportion tests)",
-      "- One-sample uses a **score/Wilson-type** approach; multi-group uses **Pearson chi-squared**.",
+      "- One-sample uses the score-test framework as printed; multi-group tests use Pearson chi-squared logic.",
       "- Two-sample: CI for the **difference** in proportions if printed (often Wilson/Newcombe-style).",
       "- Continuity correction can affect 2x2 approximations; adequacy degrades with sparse cells.",
       "- Keep claims within what is printed; do not assert unprinted diagnostics.",
@@ -187,36 +202,33 @@ trainer_prop_test <- function(pt_obj,
       profile$audience,
       "beginner" = paste0(
         "## Output requirements (BEGINNER)\n",
-        "- **What was tested**: say what proportion(s) were checked and what the null claims.\n",
-        "- **Report**: X^2", if (isTRUE(profile$include_df)) "(df)" else "", ", p-value, sample proportion(s), and ",
+        "1) **What was tested**: say what proportion(s) were checked and what the null claims.\n",
+        "2) **Evidence check**: report X^2", if (isTRUE(profile$include_df)) "(df)" else "", ", p-value, sample proportion(s), and ",
         if (branch == "one") paste0(conf_str, " CI for the proportion.") else if (branch == "two") paste0(conf_str, " CI for the difference in proportions.") else "the printed global result (no CI for 3+ groups or given p).", "\n",
-        "- **Decision**: compare p to alpha = ", a, ".\n",
-        "- **Plain meaning**: above/below target (one-sample) or which group is higher (two-sample).\n",
-        "- **Note**: large-sample approximation; very small counts can reduce reliability.\n",
-        "- **Style**: short sentences; no new calculations.\n\n",
+        "3) **Decision**: compare p to alpha = ", a, ".\n",
+        "4) **Plain meaning**: for one-sample, say above/below target only if supported; for two-sample, name the higher group only from printed proportions; for 3+ groups, do not identify drivers unless printed.\n",
+        "5) **Boundary**: large-sample approximation; very small counts can reduce reliability; no new calculations.\n\n",
         "**Return only a short explanation (5-8 short sentences).**"
       ),
       "applied" = paste0(
         "## Output requirements (APPLIED)\n",
-        "- **Test**: ", branch_hint, "; alternative: ", alt_text, ". Method: ", method_line, ".\n",
-        "- **Report**: X^2", if (isTRUE(profile$include_df)) "(df)" else "", ", p, sample proportion(s), decision at alpha = ", a, ". ",
+        "1) **Evidence used**: ", branch_hint, "; alternative: ", alt_text, "; method: ", method_line, ".\n",
+        "2) **Report / decision**: X^2", if (isTRUE(profile$include_df)) "(df)" else "", ", p, sample proportion(s), and decision at alpha = ", a, ". ",
         if (branch == "one") paste0("Also report the ", conf_str, " CI for the proportion.") else "",
         if (branch == "two") paste0(" Also report the ", conf_str, " CI for the difference in proportions.") else "", "\n",
-        "- **Practical meaning**: direction and magnitude in percentage points.\n",
-        "- **Assumptions**: chi-squared approximation; Yates correction may be applied for 2x2. No invented diagnostics.\n",
-        "- **Takeaway**: <=", profile$max_bullets, " bullets (<= ", profile$max_words_takeaway, " words)."
+        "3) **Practical meaning**: describe direction/magnitude from printed proportions or CI only; do not compute percentage-point differences unless printed.\n",
+        "4) **Scope**: for 3+ groups or given probabilities, interpret the global test only unless cell/group drivers are printed.\n",
+        "5) **Assumptions**: chi-squared approximation; Yates correction may be applied for 2x2; no invented diagnostics."
       ),
       "advanced" = paste0(
         "## Output requirements (ADVANCED)\n",
-        "- **Test**: ", branch_hint, "; alternative: ", alt_text, ". Include X^2", if (isTRUE(profile$include_df)) "(df)" else "", ", p, alpha = ", a,
-        if (branch == "one") paste0(", and the ", conf_str, " score-based CI for the proportion.") else "",
-        if (branch == "two") paste0(", and the ", conf_str, " CI for the difference in proportions.") else "", "\n",
-        "- **Nuance**:\n",
-        "  - One-sample uses a score test (Wilson-type CI) as printed.\n",
-        "  - Two or more groups use Pearson chi-squared; Yates may apply for 2x2 (as printed).\n",
-        "  - No CI for k>2 or for given p across k>2 groups unless printed.\n",
-        "- **Small-sample caution**: consider exact binomial (one-sample) or Fisher's exact (2x2) when sparse.\n",
-        "- **Takeaway**: <=", profile$max_bullets, " bullets (<= ", profile$max_words_takeaway, " words)."
+        "1) **Statistical evidence artifact**: ", branch_hint, "; alternative = ", alt_text, "; include X^2", if (isTRUE(profile$include_df)) "(df)" else "", ", p, alpha = ", a,
+        if (branch == "one") paste0(", and the ", conf_str, " CI for the proportion as printed.") else "",
+        if (branch == "two") paste0(", and the ", conf_str, " CI for the difference in proportions as printed.") else "", "\n",
+        "2) **Decision**: apply alpha and identify whether the evidence addresses a target proportion, two-group equality, k-group equality, or given probabilities.\n",
+        "3) **Interpretation scope**: for k>2/given-p tests, do not infer which groups drive the result unless residuals, post-hoc tests, or group-level evidence are printed.\n",
+        "4) **Approximation caution**: note chi-squared approximation and Yates correction when printed; suggest exact/simulation checks only as possible next steps, not computed results.\n",
+        "5) **Unsupported claims**: no unprinted percentage-point differences, no unprinted diagnostics, no causal claim."
       )
     )
   }
@@ -233,5 +245,5 @@ trainer_prop_test <- function(pt_obj,
   )
 
   # --- Return or generate -----------------------------------------------------
-  trainer_core_generate_or_return(prompt, llm_model = llm_model, generate = generate)
+  trainer_core_generate_or_return(prompt, llm_model = llm_model, generate = generate, llm_engine = llm_engine, ...)
 }

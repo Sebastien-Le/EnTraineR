@@ -11,7 +11,9 @@ trainer_t_test(
   audience = c("beginner", "applied", "advanced"),
   summary_only = FALSE,
   llm_model = "llama3",
-  generate = FALSE
+  generate = FALSE,
+  llm_engine = c("ollama", "gemini", "none"),
+  ...
 )
 }
 \arguments{
@@ -28,15 +30,28 @@ trainer_t_test(
 \item{llm_model}{Character; model name passed to your generator (default "llama3").}
 
 \item{generate}{Logical; if TRUE, call \code{trainer_core_generate_or_return()} and return prompt + response.}
+
+\item{llm_engine}{Character; backend engine: "ollama", "gemini", or "none".}
+
+\item{...}{Passed to the selected LLM backend when `generate = TRUE`.}
 }
 \value{
-If \code{generate = FALSE}, the prompt string. Else a list with \code{prompt}, \code{response}, \code{model}.
+An `entrainer_prompt` object. It behaves like a character string
+  for `cat()`/printing and stores LLM metadata and response as attributes
+  when `generate = TRUE`.
 }
 \description{
 Builds a clear, audience-tailored prompt to interpret a base R \code{stats::t.test()} result.
 Identifies the test flavor (One-sample, Two-sample, Paired, Welch) and instructs the LLM
 to use ONLY printed values (p, t, df, CI, estimates) and avoid any new calculations.
 }
+\section{Privacy}{
+
+If `generate = TRUE` and `llm_engine` is not `"none"`, the prompt is sent
+to the selected LLM backend. With external providers such as Gemini, this may
+include excerpts of statistical outputs and user-provided context.
+}
+
 \examples{
 set.seed(1)
 tt1 <- t.test(rnorm(20, 0.1), mu = 0)              # one-sample

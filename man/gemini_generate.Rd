@@ -24,7 +24,9 @@ gemini_generate(
   backoff_base = 0.8,
   backoff_cap = 8,
   force_markdown = TRUE,
-  compile_to = c("none", "html", "docx")
+  compile_to = c("none", "html", "docx"),
+  output_path = NULL,
+  open = interactive()
 )
 }
 \arguments{
@@ -68,14 +70,26 @@ gemini_generate(
 \item{force_markdown}{Logical. If TRUE, instructs the model to answer in Markdown.}
 
 \item{compile_to}{Character scalar. One of c("none","html","docx").}
+
+\item{output_path}{Optional character scalar. Destination file for HTML/DOCX output.
+If NULL, a temporary file is created.}
+
+\item{open}{Logical; if TRUE, open the generated HTML/DOCX file. Defaults to
+`interactive()`.}
 }
 \value{
-If compile_to = "none": character scalar (raw text as returned by the API).
-If compile_to = "html": list(markdown = <string>, html_path = <path>), and opens the HTML.
-If compile_to = "docx": list(markdown = <string>, docx_path = <path>), and opens the DOCX.
+An object of class `entrainer_response` with a stable structure.
+  The generated text is available in `$text`/`$markdown`; `html_path` or
+  `docx_path` are populated when `compile_to` is `"html"` or `"docx"`.
 }
 \description{
 Minimal wrapper around the Generative Language API ':generateContent' endpoint
 for text prompts, with retries, exponential backoff, clearer errors, and
-optional output compilation (HTML/DOCX) with auto-open.
+optional output compilation (HTML/DOCX). Files are opened only when `open = TRUE`.
 }
+\section{Privacy}{
+
+This function sends `prompt` to the Google Generative Language API. Do not
+include confidential data unless this is intended and allowed in your context.
+}
+

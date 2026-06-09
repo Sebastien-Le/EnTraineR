@@ -10,10 +10,18 @@
 #' @param summary_only Logical; if TRUE, return a 3-bullet executive summary
 #'   regardless of audience depth (uses trainer_core_summary_only_block()).
 #' @param llm_model Character; model name for the generator (default "llama3").
+#' @param llm_engine Character; backend engine: "ollama", "gemini", or "none".
+#' @param ... Passed to the selected LLM backend when `generate = TRUE`.
 #' @param generate Logical; if TRUE, call the generator and return prompt + response.
 #'
-#' @return If generate = FALSE, a prompt string. If TRUE, a list with
-#'   prompt, response, and model.
+#' @section Privacy:
+#' If `generate = TRUE` and `llm_engine` is not `"none"`, the prompt is sent
+#' to the selected LLM backend. With external providers such as Gemini, this may
+#' include excerpts of statistical outputs and user-provided context.
+#'
+#' @return An `entrainer_prompt` object. It behaves like a character string
+#'   for `cat()`/printing and stores LLM metadata and response as attributes
+#'   when `generate = TRUE`.
 #' @examples
 #' set.seed(1)
 #' x <- rnorm(25, sd = 1.0); y <- rnorm(30, sd = 1.3)
@@ -27,11 +35,18 @@ trainer_var_test <- function(vt_obj,
                              audience = c("beginner","applied","advanced"),
                              summary_only = FALSE,
                              llm_model = "llama3",
-                             generate = FALSE) {
+                             generate = FALSE,
+                             llm_engine = c("ollama", "gemini", "none"),
+                             ...) {
 
   audience <- match.arg(audience)
-  if (is.null(vt_obj) || !inherits(vt_obj, "htest"))
-    stop("vt_obj must be an 'htest' from base R var.test().")
+  alpha <- trainer_core_check_probability(alpha, "alpha")
+  summary_only <- trainer_core_check_flag(summary_only, "summary_only")
+  generate <- trainer_core_check_flag(generate, "generate")
+  llm_model <- trainer_core_check_string(llm_model, "llm_model")
+  llm_engine <- match.arg(llm_engine)
+  introduction <- trainer_core_check_optional_string(introduction, "introduction")
+  trainer_core_check_htest(vt_obj, "vt_obj", "F test|variance|variances")
 
   # --- Audience profile & header ---------------------------------------------
   profile <- trainer_core_audience_profile(audience, alpha, summary_only = summary_only)
@@ -75,23 +90,24 @@ trainer_var_test <- function(vt_obj,
     "beginner" = paste(
       "### How to read (F test for variances)",
       "- The test compares the **ratio of variances** between two groups (often vs 1 = equal variances).",
-      "- If the **ratio > 1**, the first group is more variable; if **< 1**, it is less variable.",
+      "- If the **ratio > 1**, the numerator/first sample is more variable; if **< 1**, it is less variable.",
+      "- Name the group direction only if the printed output clearly identifies the numerator/denominator order.",
       "- The **p-value** indicates how unusual the observed ratio would be if the null were true.",
-      "- The **confidence interval** for the ratio that does **not include 1** supports different variances.",
+      "- The **confidence interval** supports a difference when it does not include the null ratio, usually 1.",
       sep = "\n"
     ),
     "applied" = paste(
       "### How to read (F test for variances)",
-      "- Report F (df1, df2) and **p**; interpret the **variance ratio** as 'how many times more/less variable'.",
+      "- Report F (df1, df2) and **p**; interpret the **variance ratio** only according to the printed numerator/denominator order.",
       "- **Two-sided vs one-sided** alternative changes the decision rule.",
       "- Be cautious: the F test is **sensitive to non-normality and outliers**; consider robust alternatives if needed.",
-      "- CI for the ratio helps quantify uncertainty; focus on whether it crosses 1.",
+      "- CI for the ratio helps quantify uncertainty; focus on whether it crosses the null ratio, usually 1.",
       sep = "\n"
     ),
     "advanced" = paste(
       "### How to read (F test for variances)",
-      "- F = (s1^2 / s2^2) vs an F(df1, df2) reference; asymmetry implies CI bounds are not symmetric around 1.",
-      "- Decision via **p** or whether the CI for the ratio excludes 1, given the specified alternative.",
+      "- Use the printed F statistic, df1/df2, p-value, estimated variance ratio, and null ratio; the numerator/denominator order determines the direction.",
+      "- Decision via **p** or whether the CI for the ratio excludes the null ratio, usually 1, given the specified alternative.",
       "- Non-robust to heavy tails/outliers; robust checks (Levene/Brown-Forsythe/Fligner) may be preferable.",
       "- Keep claims within what is printed; do not invent diagnostics.",
       sep = "\n"
@@ -128,27 +144,27 @@ trainer_var_test <- function(vt_obj,
       profile$audience,
       "beginner" = paste0(
         "## Output requirements (BEGINNER)\n",
-        "- **What was tested**: whether the two groups have the same variability.\n",
-        "- **Report**: F", if (profile$include_df) " (df1, df2)" else "", ", p-value, estimated variance ratio, null ratio, and the ", conf_str, " CI.\n",
-        "- **Decision**: compare p to alpha = ", a, ".\n",
-        "- **Plain meaning**: if ratio > 1, the first group is more variable; if < 1, less variable.\n",
-        "- **Assumption note**: assumes normal populations; sensitive to outliers.\n",
-        "- **Style**: short sentences; no new calculations."
+        "1) **What was tested**: whether the two groups have the same variability.\n",
+        "2) **Evidence check**: report F", if (profile$include_df) " (df1, df2)" else "", ", p-value, estimated variance ratio, null ratio, and the ", conf_str, " CI.\n",
+        "3) **Decision**: compare p to alpha = ", a, ".\n",
+        "4) **Plain meaning**: interpret the ratio using the printed numerator/denominator order; if this order is unclear, do not name a group direction.\n",
+        "5) **Boundary**: assumes normal populations and is sensitive to outliers; no new calculations."
       ),
       "applied" = paste0(
         "## Output requirements (APPLIED)\n",
-        "- **Test**: F test comparing two variances; **alternative**: ", alt_text, ".\n",
-        "- **Report**: F", if (profile$include_df) " (df1, df2)" else "", ", p, estimated variance ratio, null ratio, ", conf_str, " CI; decision at alpha = ", a, ".\n",
-        "- **Interpretation**: translate the ratio as 'how much more/less variable'.\n",
-        "- **Assumptions**: normality and independence; consider robust alternatives if outliers.\n",
-        "- **Takeaway**: <=", profile$max_bullets, " bullets (<= ", profile$max_words_takeaway, " words)."
+        "1) **Evidence used**: F test comparing two variances; alternative = ", alt_text, "; report F", if (profile$include_df) " (df1, df2)" else "", ", p, estimated variance ratio, null ratio, ", conf_str, " CI, and alpha = ", a, ".\n",
+        "2) **Decision**: decide at alpha using the printed p-value and/or whether the CI excludes the null ratio.\n",
+        "3) **Interpretation**: translate the ratio only if the printed order is clear; otherwise state that direction depends on the output order.\n",
+        "4) **Assumptions / limits**: normality and independence; sensitivity to outliers; robust alternatives may be needed but are not computed here.\n",
+        "5) **Takeaway**: <=", profile$max_bullets, " bullets (<= ", profile$max_words_takeaway, " words)."
       ),
       "advanced" = paste0(
         "## Output requirements (ADVANCED)\n",
-        "- **Test**: F for variance ratio; **alternative**: ", alt_text, ". Include F", if (profile$include_df) " (df1, df2)" else "", ", p, estimate, null ratio, ", conf_str, " CI; alpha = ", a, ".\n",
-        "- **Notes**: F is non-robust; log-scale interpretations can help (do not compute if not printed).\n",
-        "- **Design caution**: unequal n or outliers can inflate Type I error; consider robust tests (Levene/Brown-Forsythe/Fligner) if needed.\n",
-        "- **Takeaway**: <=", profile$max_bullets, " bullets (<= ", profile$max_words_takeaway, " words)."
+        "1) **Statistical evidence artifact**: F variance-ratio test; alternative = ", alt_text, "; report F", if (profile$include_df) " (df1, df2)" else "", ", p, estimate, null ratio, ", conf_str, " CI, and alpha = ", a, ".\n",
+        "2) **Decision**: evaluate the null ratio using p and CI compatibility; do not compute log-scale or standardized summaries unless printed.\n",
+        "3) **Direction**: interpret numerator/denominator order explicitly; if unclear, do not attribute higher variability to a named group.\n",
+        "4) **Assumptions / unsupported claims**: note non-robustness to non-normality/outliers; do not invent diagnostics or robust-test results.\n",
+        "5) **Takeaway**: <=", profile$max_bullets, " bullets (<= ", profile$max_words_takeaway, " words)."
       )
     )
   }
@@ -164,5 +180,5 @@ trainer_var_test <- function(vt_obj,
   )
 
   # --- Return prompt or generate via LLM -------------------------------------
-  trainer_core_generate_or_return(prompt, llm_model = llm_model, generate = generate)
+  trainer_core_generate_or_return(prompt, llm_model = llm_model, generate = generate, llm_engine = llm_engine, ...)
 }

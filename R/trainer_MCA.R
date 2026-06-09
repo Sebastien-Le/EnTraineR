@@ -6,7 +6,7 @@
 #' \code{summary(mca_obj)} and \code{FactoMineR::dimdesc()} filtered at a given
 #' significance threshold \code{proba}, and instructs how to read and name the axis.
 #'
-#' @param mca_obj A MCA object returned by \code{FactoMineR::MCA()}.
+#' @param x A MCA object returned by \code{FactoMineR::MCA()}.
 #' @param dimension Integer scalar; the dimension (component) to name (default 1).
 #' @param proba Numeric in (0,1]; significance threshold used by
 #'   \code{FactoMineR::dimdesc()} to characterize the dimension (default 0.05).
@@ -17,13 +17,21 @@
 #'   summary (uses \code{trainer_core_summary_only_block()}).
 #' @param llm_model Character; model name for your generator backend
 #'   (default \code{"llama3"}).
+#' @param llm_engine Character; backend engine: "ollama", "gemini", or "none".
+#' @param ... Passed to the selected LLM backend when `generate = TRUE`.
 #' @param generate Logical; if TRUE, calls
 #'   \code{trainer_core_generate_or_return()} and returns a list with
 #'   \code{prompt}, \code{response}, and \code{model}. If FALSE, returns the
 #'   prompt string.
 #'
-#' @return If \code{generate = FALSE}, a character prompt string.
-#'   If \code{generate = TRUE}, a list with \code{prompt}, \code{response}, and \code{model}.
+#' @section Privacy:
+#' If `generate = TRUE` and `llm_engine` is not `"none"`, the prompt is sent
+#' to the selected LLM backend. With external providers such as Gemini, this may
+#' include excerpts of statistical outputs and user-provided context.
+#'
+#' @return An `entrainer_prompt` object. It behaves like a character string
+#'   for `cat()`/printing and stores LLM metadata and response as attributes
+#'   when `generate = TRUE`.
 #' @export
 #'
 #' @examples
@@ -37,7 +45,7 @@
 #'   intro <- gsub("\n", " ", intro); intro <- gsub("\\s+", " ", intro)
 #'
 #'   # Applied audience
-#'   prompt <- trainer_MCA(res_mca,
+#'   prompt <- trainer_mca(res_mca,
 #'                         dimension = 1,
 #'                         proba = 0.01,
 #'                         introduction = intro,
@@ -48,22 +56,32 @@
 #'   res <- gemini_generate(prompt, compile_to = "html")
 #' }
 #' }
-trainer_MCA <- function(mca_obj,
+trainer_mca <- function(x,
                         dimension = 1L,
                         proba = 0.05,
                         introduction = NULL,
                         audience = c("beginner","applied","advanced"),
                         summary_only = FALSE,
                         llm_model = "llama3",
-                        generate = FALSE) {
+                        generate = FALSE,
+                        llm_engine = c("ollama", "gemini", "none"),
+                        ...) {
+
+  mca_obj <- x
 
   audience <- match.arg(audience)
+  proba <- trainer_core_check_probability(proba, "proba", include_upper = TRUE)
+  summary_only <- trainer_core_check_flag(summary_only, "summary_only")
+  generate <- trainer_core_check_flag(generate, "generate")
+  llm_model <- trainer_core_check_string(llm_model, "llm_model")
+  llm_engine <- match.arg(llm_engine)
+  introduction <- trainer_core_check_optional_string(introduction, "introduction")
 
-  if (is.null(mca_obj) || !inherits(mca_obj, "MCA"))
-    stop("mca_obj must be an 'MCA' object from FactoMineR::MCA().")
+  if (is.null(mca_obj) || !inherits(mca_obj, "MCA")) {
+    stop("`x` must be an 'MCA' object from FactoMineR::MCA().", call. = FALSE)
+  }
 
-  if (!is.numeric(proba) || length(proba) != 1L || is.na(proba) || proba <= 0 || proba > 1)
-    stop("proba must be a single numeric value in (0, 1].")
+  dimension <- trainer_core_check_dimension(dimension, trainer_core_max_dimensions(mca_obj))
 
   # ---- Core audience profile & header ---------------------------------------
   profile <- trainer_core_audience_profile(audience, alpha = proba,
@@ -122,9 +140,9 @@ trainer_MCA <- function(mca_obj,
     "beginner" = paste(
       "### How to read (MCA dimension naming)",
       "- Think of this axis as a **hidden 'profile'** that separates respondents.",
-      "- **Check the sign of the 'Estimate'**: positive values represent one profile, negative values represent the opposite profile.",
+      "- **Check both poles**: positive Estimates define one profile; negative Estimates define the opposite profile.",
       "- Name the **theme** that opposes these two profiles (e.g., 'Modern vs Traditional').",
-      paste0("- Variables in dimdesc are filtered at p <= ", format(proba), ". If none pass, say: 'inconclusive at this threshold'."),
+      paste0("- Variables in dimdesc are filtered at p <= ", format(proba), ". If dimdesc is empty, use structured evidence only as exploratory and low-confidence."),
       "- eta^2 indicates how much a variable explains the dimension (global link).",
       "- Use very short sentences (<= 15 words). No new calculations.",
       sep = "\n"
@@ -132,58 +150,72 @@ trainer_MCA <- function(mca_obj,
     "applied" = paste(
       "### How to read (MCA dimension naming)",
       "- Name the **synthetic behavioral pattern** (latent factor) that organizes the data.",
-      "- **Identify the opposition**: Contrast the 'profile' defined by categories with positive Estimates vs. those with negative Estimates.",
+      "- **Identify the opposition**: contrast categories with positive Estimates against categories with negative Estimates before naming the axis.",
       "- Find the common thread that links categories on the same pole.",
-      paste0("- Use dimdesc (p <= ", format(proba), "); prefer variables with high eta^2 (link strength)."),
-      "- Add one 'so what' sentence on how this axis can be used.",
+      paste0("- Use dimdesc (p <= ", format(proba), "); prefer variables with high eta^2, but treat empty dimdesc as low-confidence."),
+      "- Add a 'so what' sentence only when the study context supports it.",
       "- No new calculations; use only printed material.",
       sep = "\n"
     ),
     "advanced" = paste(
       "### How to read (MCA dimension naming)",
       "- Conceptualize the dimension as a **latent categorical construct** explaining the inertia.",
-      "- **Interpret the structural opposition** between the centroids of categories with positive vs. negative Estimates.",
+      "- **Interpret the structural opposition** between categories with positive vs. negative Estimates before proposing a latent categorical construct.",
       "- Ensure the label is sign-agnostic (orientation-free).",
       paste0("- Interpret dimdesc under p <= ", format(proba), "; prioritize variables with higher discrimination measures."),
       "- You may add a brief stability note (sensitivity to threshold/sample), without new computations.",
-      "- Supplementary elements should be cited as archetypes only.",
+      "- Supplementary elements may contextualize or illustrate the axis, but active categories define the name.",
       sep = "\n"
+    )
+  )
+
+  # ---- Structured evidence from FactoMineR object ------------------------------
+  structured_block <- paste0(
+    "### Structured axis evidence (extracted from the MCA object)\n",
+    trainer_core_factor_axis_evidence(
+      mca_obj,
+      dimension = as.integer(dimension),
+      element_label = "categories",
+      top_n = 12L
     )
   )
 
   # ---- Output requirements ---------------------------------------------------
   if (isTRUE(profile$summary_only)) {
-    output_reqs <- trainer_core_summary_only_block(
-      words_limit = 50,
-      bullets = 3,
-      label = paste0("MCA Dimension ", as.integer(dimension), " (naming)")
+    output_reqs <- paste0(
+      "## Output requirements (SUMMARY-ONLY)\n",
+      "- Provide ONLY 3 short bullets (<= 50 words total):\n",
+      "  1) Final sign-agnostic name for MCA Dimension ", as.integer(dimension), ".\n",
+      "  2) Main positive-vs-negative profile opposition, using only printed categories.\n",
+      "  3) Confidence/limitation: say if dimdesc is weak, empty, or only exploratory.\n",
+      "- No new calculations; supplementary elements may illustrate but not define the name."
     )
   } else {
     output_reqs <- switch(
       profile$audience,
       "beginner" = paste0(
         "## Output requirements (BEGINNER)\n",
-        "1) Propose 2 candidate names for Dimension ", as.integer(dimension), " (2-4 words each), sign-agnostic.\n",
-        "2) For each candidate, give 1 short sentence using ONLY printed categories.\n",
-        "3) Choose ONE final name (bold) and give 1 short sign-agnostic definition.\n",
-        "4) If no variables pass the threshold, say 'inconclusive at this threshold' and stop.\n",
+        "1) **Pole evidence**: list the positive profile and negative profile in simple words, using only printed categories.\n",
+        "2) **Candidate names**: propose 2 sign-agnostic names for Dimension ", as.integer(dimension), " (2-4 words each), each justified by the profile opposition.\n",
+        "3) **Final name**: choose ONE final name (bold) and give one short sign-agnostic definition of the continuum/profile.\n",
+        "4) **Confidence**: if dimdesc is empty or few categories pass the threshold, say the name is exploratory/low-confidence rather than stopping.\n",
         "5) Use short sentences; no new numbers or calculations."
       ),
       "applied" = paste0(
         "## Output requirements (APPLIED)\n",
-        "1) Propose 3 candidate names for Dimension ", as.integer(dimension), " (2-4 words each), sign-agnostic.\n",
-        "2) For each candidate, give 1 practical sentence that justifies it by synthesizing the opposition between positive/negative Estimates.\n",
-        "3) Choose ONE final name (bold) and provide a one-sentence definition that is sign-agnostic.\n",
-        "4) Add one 'so what' sentence on how this axis can be used (e.g., segmentation, profiling).\n",
-        "5) If few variables pass the threshold, acknowledge the limitation; no new numbers."
+        "1) **Pole evidence**: summarize positive and negative profiles separately, prioritizing printed categories and eta^2 evidence.\n",
+        "2) **Candidate names**: propose 3 sign-agnostic names for Dimension ", as.integer(dimension), " (2-4 words each), each tied to the positive/negative profile opposition.\n",
+        "3) **Final name**: choose ONE final name (bold) and define the latent profile continuum in one sentence.\n",
+        "4) **Use case**: add one 'so what' sentence only if it follows from the study context; otherwise say what context is missing.\n",
+        "5) **Confidence**: explicitly rate the naming evidence as strong/moderate/low based on coherence and printed evidence; no new numbers."
       ),
       "advanced" = paste0(
         "## Output requirements (ADVANCED)\n",
-        "1) Propose 3 candidate names for Dimension ", as.integer(dimension), " (2-4 words), sign-agnostic and driven by the dominant latent structure (eta^2/categories).\n",
-        "2) Justify each name in 1 sentence referencing ONLY printed info and, when printed, the dimension variance explained.\n",
-        "3) Choose ONE final name (bold) and provide a compact definition; note any observed coherence between categories on each pole.\n",
-        "4) Optionally add 1 brief stability remark (sensitivity to threshold/sample) without new computations.\n",
-        "5) Do not reconstruct unprinted values; no new calculations."
+        "1) **Statistical evidence artifact**: separate positive-profile categories, negative-profile categories, eta^2/global variable links, and dimdesc evidence.\n",
+        "2) **Candidate names**: propose 3 sign-agnostic labels and justify each from the printed categorical opposition only.\n",
+        "3) **Final construct**: choose ONE final name (bold), define the continuum/profile, and state the central opposition.\n",
+        "4) **Evidence strength**: discuss coherence, threshold sensitivity, and whether dimdesc is empty/few categories, without new computations.\n",
+        "5) **Unsupported claims**: do not reconstruct values, infer causality, or let supplementary elements determine the name."
       )
     )
   }
@@ -214,6 +246,8 @@ trainer_MCA <- function(mca_obj,
     "",
     howto_block,
     "",
+    structured_block,
+    "",
     dd_chunk,
     "",
     sum_chunk,
@@ -231,5 +265,15 @@ trainer_MCA <- function(mca_obj,
   )
 
   # ---- Return or generate ----------------------------------------------------
-  trainer_core_generate_or_return(prompt, llm_model = llm_model, generate = generate)
+  trainer_core_generate_or_return(prompt, llm_model = llm_model, generate = generate, llm_engine = llm_engine, ...)
+}
+
+#' Deprecated alias for `trainer_mca()`
+#'
+#' @rdname trainer_mca
+#' @param mca_obj Deprecated name for `x`.
+#' @export
+trainer_MCA <- function(mca_obj, ...) {
+  .Deprecated("trainer_mca")
+  trainer_mca(x = mca_obj, ...)
 }

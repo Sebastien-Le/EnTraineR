@@ -3,7 +3,7 @@
 #' @description
 #' Builds a clear, audience-tailored prompt to interpret base R stats::chisq.test()
 #' results, handling both goodness-of-fit and contingency-table tests.
-#' Aligned with other TraineR trainers: no invented numbers; audience-specific guidance.
+#' Aligned with other EntraineR trainers: no invented numbers; audience-specific guidance.
 #'
 #' @param csq_obj An htest object returned by stats::chisq.test().
 #' @param introduction Optional character string giving the study context.
@@ -12,10 +12,18 @@
 #' @param summary_only Logical; if TRUE, return a 3-bullet executive summary
 #'   regardless of audience depth (uses trainer_core_summary_only_block()).
 #' @param llm_model Character; model name for the generator (default "llama3").
+#' @param llm_engine Character; backend engine: "ollama", "gemini", or "none".
+#' @param ... Passed to the selected LLM backend when `generate = TRUE`.
 #' @param generate Logical; if TRUE, call the generator and return prompt + response.
 #'
-#' @return If generate = FALSE, a prompt string. If TRUE, a list with
-#'   prompt, response, and model.
+#' @section Privacy:
+#' If `generate = TRUE` and `llm_engine` is not `"none"`, the prompt is sent
+#' to the selected LLM backend. With external providers such as Gemini, this may
+#' include excerpts of statistical outputs and user-provided context.
+#'
+#' @return An `entrainer_prompt` object. It behaves like a character string
+#'   for `cat()`/printing and stores LLM metadata and response as attributes
+#'   when `generate = TRUE`.
 #' @examples
 #' # GOF
 #' set.seed(1); x <- c(18, 22, 20, 25, 15)
@@ -33,11 +41,18 @@ trainer_chisq_test <- function(csq_obj,
                                audience = c("beginner","applied","advanced"),
                                summary_only = FALSE,
                                llm_model = "llama3",
-                               generate = FALSE) {
+                               generate = FALSE,
+                               llm_engine = c("ollama", "gemini", "none"),
+                               ...) {
 
   audience <- match.arg(audience)
-  if (is.null(csq_obj) || !inherits(csq_obj, "htest"))
-    stop("csq_obj must be an 'htest' from base R chisq.test().")
+  alpha <- trainer_core_check_probability(alpha, "alpha")
+  summary_only <- trainer_core_check_flag(summary_only, "summary_only")
+  generate <- trainer_core_check_flag(generate, "generate")
+  llm_model <- trainer_core_check_string(llm_model, "llm_model")
+  llm_engine <- match.arg(llm_engine)
+  introduction <- trainer_core_check_optional_string(introduction, "introduction")
+  trainer_core_check_htest(csq_obj, "csq_obj", "Chi-squared|chi-squared|Chi-sq|chi-sq")
 
   # --- Audience profile & header ---------------------------------------------
   profile <- trainer_core_audience_profile(audience, alpha, summary_only = summary_only)
@@ -89,7 +104,7 @@ trainer_chisq_test <- function(csq_obj,
       else
         "- **Independence**: are the row/column variables unrelated in the population?",
       "- The **p-value** comes from a chi-squared reference (or simulation if stated).",
-      "- **Residuals** show which cells differ most from the null (look for large positive/negative values if printed).",
+      "- **Residuals** show which cells differ most from the null only if residuals are printed; otherwise interpret the global test only.",
       sep = "\n"
     ),
     "applied" = paste(
@@ -101,15 +116,15 @@ trainer_chisq_test <- function(csq_obj,
       "- For **2x2 tables**, Yates' continuity correction may be applied (as printed).",
       if (has_mc) "- With **Monte Carlo** p-values, df may be NA; p is based on simulated tables."
       else "- Asymptotic chi-squared p-value by default.",
-      "- Inspect **standardized residuals** (if printed) to see which cells drive the result.",
+      "- Inspect **standardized residuals** only if printed; without them, do not name cell drivers.",
       sep = "\n"
     ),
     "advanced" = paste(
       "### How to read (Chi-squared test)",
       "- Asymptotics assume adequate expected counts (rule of thumb: many cells around >= 5).",
       "- 2x2: Yates' correction can be conservative; Fisher's exact is an alternative for sparse data (do not compute here).",
-      "- Monte Carlo (if used) simulates tables with fixed margins; df may be NA; report replicates only if printed.",
-      "- Use printed (standardized) residuals for cell-wise diagnostics; do not fabricate effect sizes.",
+      "- Monte Carlo p-values are simulation-based; for contingency tables, simulations use fixed margins; for goodness-of-fit, simulations follow the null probabilities. df may be NA; report replicates only if printed.",
+      "- Use printed (standardized) residuals for cell-wise diagnostics; do not fabricate effect sizes or residuals.",
       sep = "\n"
     )
   )
@@ -142,9 +157,10 @@ trainer_chisq_test <- function(csq_obj,
     a <- trainer_core_fmt_alpha(alpha)
 
     common_items <- paste0(
-      "- **Report**: X^2", if (isTRUE(profile$include_df)) "(df)" else "",
-      ", p-value, and decision at alpha = ", a, ".\n",
-      "- **Drivers**: if residuals/standardized residuals are printed, name the cells with the largest departures (no new calculations)."
+      "- **Evidence used**: X^2", if (isTRUE(profile$include_df)) "(df)" else "",
+      ", p-value, alpha = ", a, ", and any printed residuals/expected counts.\n",
+      "- **Decision**: decide at alpha using the printed p-value.\n",
+      "- **Drivers**: name cells only if residuals/standardized residuals are printed; otherwise state that the output supports only a global conclusion."
     )
 
     output_reqs <- switch(
@@ -155,8 +171,8 @@ trainer_chisq_test <- function(csq_obj,
         if (identical(branch, "gof")) "does the observed distribution match the target probabilities?\n"
         else "are the two variables independent?\n",
         common_items, "\n",
-        "- **Plain meaning**: say whether counts look different from expectation and where (using printed residuals).\n",
-        "- **Style**: short sentences; do not compute new statistics.\n\n",
+        "- **Plain meaning**: say whether counts look different from expectation; say where only when printed residuals support it.\n",
+        "- **Boundary**: no Cramer's V, no post-hoc conclusions, and no cell drivers unless printed.\n\n",
         "**Return only a short explanation (5-8 short sentences).**"
       ),
       "applied" = paste0(
@@ -167,8 +183,9 @@ trainer_chisq_test <- function(csq_obj,
         if (has_mc) "Monte Carlo p-value used (df may be NA). " else "",
         "\n",
         common_items, "\n",
-        "- **Practical reading**: describe the pattern of over-/under-represented cells from printed (standardized) residuals.\n",
+        "- **Practical reading**: describe over-/under-represented cells only from printed residuals; otherwise keep the interpretation global.\n",
         "- **Assumptions**: adequate expected counts; consider exact/Monte Carlo methods when sparse (do not compute here).\n",
+        "- **Unsupported claims**: no effect size, no post-hoc tests, no residual diagnostics unless printed.\n",
         "- **Takeaway**: <=", profile$max_bullets, " bullets (<= ", profile$max_words_takeaway, " words)."
       ),
       "advanced" = paste0(
@@ -178,8 +195,9 @@ trainer_chisq_test <- function(csq_obj,
         "include X^2", if (isTRUE(profile$include_df)) "(df)" else "", ", p, alpha = ", a, ". ",
         if (has_mc) "Monte Carlo p-value: note replicates only if printed. " else "",
         "\n",
-        "- **Diagnostics**: discuss cell-wise departures using printed standardized residuals; avoid fabricating effect sizes (e.g., Cramer's V) unless printed.\n",
-        "- **Small-sample caution**: Yates/Fisher (2x2) or simulation for sparse tables; do not assert diagnostics.\n",
+        "- **Diagnostics**: discuss cell-wise departures only when printed standardized residuals are available; avoid fabricating effect sizes (e.g., Cramer's V) unless printed.\n",
+        "- **Small-sample caution**: Yates/Fisher (2x2) or simulation for sparse tables; do not assert diagnostics or adequacy of expected counts unless printed.\n",
+        "- **Statistical discipline**: separate global association/fit from cell-level explanation and list unsupported claims briefly.\n",
         "- **Takeaway**: <=", profile$max_bullets, " bullets (<= ", profile$max_words_takeaway, " words)."
       )
     )
@@ -197,5 +215,5 @@ trainer_chisq_test <- function(csq_obj,
   )
 
   # --- Return or generate -----------------------------------------------------
-  trainer_core_generate_or_return(prompt, llm_model = llm_model, generate = generate)
+  trainer_core_generate_or_return(prompt, llm_model = llm_model, generate = generate, llm_engine = llm_engine, ...)
 }

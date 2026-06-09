@@ -7,7 +7,7 @@
 #' instructs how to interpret deviation contrasts (sum-to-zero) for factors.
 #' Works for ANOVA, ANCOVA, and multiple regression.
 #'
-#' @param lm_obj An object returned by FactoMineR::LinearModel(...).
+#' @param x An object returned by FactoMineR::LinearModel(...).
 #' @param introduction Optional character string giving the study context.
 #' @param alpha Numeric significance level (default 0.05).
 #' @param t_test Optional character vector to filter the T-test section by
@@ -15,9 +15,18 @@
 #' @param audience One of c("beginner","applied","advanced").
 #' @param summary_only Logical; if TRUE, return a 3-bullet executive summary.
 #' @param llm_model Character model name for the generator (e.g., "llama3").
+#' @param llm_engine Character; backend engine: "ollama", "gemini", or "none".
+#' @param ... Passed to the selected LLM backend when `generate = TRUE`.
 #' @param generate Logical; if TRUE, call the generator.
 #'
-#' @return Character prompt or list.
+#' @section Privacy:
+#' If `generate = TRUE` and `llm_engine` is not `"none"`, the prompt is sent
+#' to the selected LLM backend. With external providers such as Gemini, this may
+#' include excerpts of statistical outputs and user-provided context.
+#'
+#' @return An `entrainer_prompt` object. It behaves like a character string
+#'   for `cat()`/printing and stores LLM metadata and response as attributes
+#'   when `generate = TRUE`.
 #'
 #' @examples
 #' # --- Example 1: multiple regression with selection (ham) -------------------
@@ -34,7 +43,7 @@
 #'   intro_ham <- gsub("\\s+", " ", intro_ham)
 #'
 #'   res <- FactoMineR::LinearModel(`Overall liking` ~ ., data = ham, selection = "bic")
-#'   pr  <- trainer_LinearModel(res, introduction = intro_ham, audience = "advanced",
+#'   pr  <- trainer_linear_model(res, introduction = intro_ham, audience = "advanced",
 #'                              generate = FALSE)
 #'   cat(pr)
 #' }
@@ -53,23 +62,42 @@
 #'
 #'   res <- FactoMineR::LinearModel(Temp_water ~ Temp_air * Deforestation,
 #'                                  data = deforestation, selection = "none")
-#'   pr  <- trainer_LinearModel(res, introduction = intro_flume, audience = "advanced",
+#'   pr  <- trainer_linear_model(res, introduction = intro_flume, audience = "advanced",
 #'                              generate = FALSE)
 #'   cat(pr)
 #' }
 #'
 #' @export
-trainer_LinearModel <- function(lm_obj,
+trainer_linear_model <- function(x,
                                 introduction = NULL,
                                 alpha = 0.05,
                                 t_test = NULL,
                                 audience = c("beginner","applied","advanced"),
                                 summary_only = FALSE,
                                 llm_model = "llama3",
-                                generate = FALSE) {
+                                generate = FALSE,
+                                llm_engine = c("ollama", "gemini", "none"),
+                                ...) {
+
+  lm_obj <- x
 
   audience <- match.arg(audience)
-  if (is.null(lm_obj)) stop("lm_obj cannot be NULL.")
+  alpha <- trainer_core_check_probability(alpha, "alpha")
+  summary_only <- trainer_core_check_flag(summary_only, "summary_only")
+  generate <- trainer_core_check_flag(generate, "generate")
+  llm_model <- trainer_core_check_string(llm_model, "llm_model")
+  llm_engine <- match.arg(llm_engine)
+  introduction <- trainer_core_check_optional_string(introduction, "introduction")
+  if (!is.null(t_test) && (!is.character(t_test) || anyNA(t_test))) {
+    stop("`t_test` must be NULL or a character vector without missing values.", call. = FALSE)
+  }
+  if (!is.character(lm_obj) && !inherits(lm_obj, "LinearModel")) {
+    stop(
+      "`x` must be an object returned by `FactoMineR::LinearModel()` ",
+      "or a character string containing a printed LinearModel output.",
+      call. = FALSE
+    )
+  }
 
   # --- Capture output --------------------------------------------------------
   lm_txt <- if (is.character(lm_obj)) paste(lm_obj, collapse = "\n") else trainer_core_capture(lm_obj)
@@ -172,27 +200,27 @@ trainer_LinearModel <- function(lm_obj,
       profile$audience,
       "beginner" = paste0(
         "## Output requirements (BEGINNER)\n",
-        "1) Model fit: R-squared and global F (plain language).\n",
-        "2) Terms that matter: which terms are significant from the F-tests.\n",
-        "3) Coefficients: for significant factors, indicate which levels are above or below the global mean (sign of coefficients; Intercept = global mean). For numeric predictors, describe direction of the slope.\n",
-        "4) Conclusion: one sentence.\n",
-        "5) Use only printed values; do not compute new statistics or effect sizes."
+        "1) **Evidence check**: identify model type, printed fit metrics (R-squared/RSE/global F when available), and the selected vs complete model status.\n",
+        "2) **Terms that matter**: first use the F-tests to identify significant terms at alpha.\n",
+        "3) **Coefficients**: for significant factors, indicate levels above/below the global mean; for numeric predictors, describe slope direction only from printed coefficients.\n",
+        "4) **Conclusion**: one sentence that does not go beyond the printed output.\n",
+        "5) **Boundary**: no new statistics, no effect sizes, no prediction quality claims without validation metrics."
       ),
       "applied" = paste0(
         "## Output requirements (APPLIED)\n",
-        "1) Fit: R2, RSE, global significance; adequacy for decisions.\n",
-        "2) Drivers (F-test): significant terms and practical implications.\n",
-        "3) Profiling (coefficients): factors are deviations around the global mean (Intercept); numeric predictors are slopes per unit change.\n",
-        "4) Selection: note if a Selected Model exists (AIC/BIC) and refer to printed metrics only.\n",
-        "5) Actionable synthesis, concise.\n",
-        "6) Use only printed values; do not introduce unprinted statistics or diagnostics."
+        "1) **Fit evidence**: report R2, RSE, and global significance as printed; do not claim adequacy for decisions without context or validation.\n",
+        "2) **Drivers (F-test)**: identify significant terms before interpreting coefficients; keep practical implications tied to the provided context.\n",
+        "3) **Profiling (coefficients)**: factors are deviations around the global mean (Intercept); numeric predictors are slopes per unit change; use printed values only.\n",
+        "4) **Selection**: note if a Selected Model exists (AIC/BIC) and compare only printed metrics; do not infer external predictive performance.\n",
+        "5) **Actionable synthesis**: concise, but only if supported by the study context.\n",
+        "6) **Boundary**: no unprinted diagnostics, no causal claims, no test-set/predictive claims unless printed."
       ),
       "advanced" = paste0(
         "## Output requirements (ADVANCED)\n",
-        "1) Diagnostics: R2/Adj-R2, RSE, F-statistic; selection gain (Delta AIC/Delta BIC) if present.\n",
-        "2) Significance: partial (added-last) F-tests; hierarchy with interactions.\n",
-        "3) Coefficients: for factors, sum-to-zero contrasts; interpret as mu_i - mu (Intercept = global mean). For numeric predictors, interpret slopes with SE and p-values. Respect printed values only.\n",
-        "4) Strictly use printed values; do not derive unprinted statistics."
+        "1) **Statistical evidence artifact**: separate fit metrics (R2/Adj-R2, RSE, F-statistic), term-level F-tests, coefficient-level evidence, and selection metrics if present.\n",
+        "2) **Significance / hierarchy**: interpret partial F-tests first; handle interactions before main effects.\n",
+        "3) **Coefficients**: for factors, sum-to-zero contrasts as mu_i - mu (Intercept = global mean); for numeric predictors, slopes with SE and p-values as printed.\n",
+        "4) **Unsupported claims**: no unprinted diagnostics, no external predictive performance, no causal interpretation, no derived statistics."
       )
     )
   }
@@ -202,26 +230,26 @@ trainer_LinearModel <- function(lm_obj,
     profile$audience,
     "beginner" = paste(
       "### How to read (LinearModel)",
-      "- Global fit: R-squared indicates how much variation is explained.",
+      "- Global fit: R-squared indicates how much variation is explained in this fitted model.",
       "- F-tests: show whether each term (factor or numeric predictor) affects the response.",
-      "- Coefficients:",
+      "- Coefficients are interpreted after the relevant term-level evidence:",
       "  - For factors: Intercept is the global mean; coefficients are deviations around this mean (positive = above, negative = below).",
       "  - For numeric predictors: coefficients are slopes (change in the response per 1-unit increase).",
       sep = "\n"
     ),
     "applied" = paste(
       "### How to read (LinearModel)",
-      "- Fit: check R2 and residual error (RSE).",
+      "- Fit: check R2 and residual error (RSE), but do not treat them as validation metrics.",
       "- Partial F-tests: contribution of each term at alpha.",
       "- Coefficients (deviation coding for factors, slopes for numeric predictors): level - global mean for factors; slope per unit change for numeric.",
-      "- Selection: if present, reflects AIC/BIC optimization; compare printed metrics only.",
+      "- Selection: if present, reflects AIC/BIC optimization; compare printed metrics only and avoid external performance claims.",
       sep = "\n"
     ),
     "advanced" = paste(
       "### How to read (LinearModel)",
       "- Factors use contr.sum (sum-to-zero). Coefficients test H0: mu_i - mu = 0; Intercept equals the global mean.",
       "- Numeric predictors enter linearly as slopes; interpret with SE and p-values as printed.",
-      "- Compare complete vs selected models when both are printed; observe hierarchy (Type II/III logic) when interactions are present, including factor:covariate interactions.",
+      "- Compare complete vs selected models when both are printed; observe hierarchy (Type II/III logic) when interactions are present, including factor:covariate interactions; do not infer diagnostics not shown.",
       sep = "\n"
     )
   )
@@ -295,5 +323,15 @@ trainer_LinearModel <- function(lm_obj,
     show_verbatim       = FALSE
   )
 
-  trainer_core_generate_or_return(prompt, llm_model, generate)
+  trainer_core_generate_or_return(prompt, llm_model = llm_model, generate = generate, llm_engine = llm_engine, ...)
+}
+
+#' Deprecated alias for `trainer_linear_model()`
+#'
+#' @rdname trainer_linear_model
+#' @param lm_obj Deprecated name for `x`.
+#' @export
+trainer_LinearModel <- function(lm_obj, ...) {
+  .Deprecated("trainer_linear_model")
+  trainer_linear_model(x = lm_obj, ...)
 }
