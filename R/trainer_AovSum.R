@@ -177,6 +177,9 @@ trainer_aovsum <- function(x,
   ftest_lines <- trimws(ftest_lines, which = "both")
   ttest_lines <- trimws(ttest_lines, which = "both")
 
+  ftest_lines <- trainer_core_as_lines(ftest_lines)
+  ttest_lines <- trainer_core_as_lines(ttest_lines)
+
   ftest_lines <- ftest_lines[nzchar(ftest_lines)]
   ttest_lines <- ttest_lines[nzchar(ttest_lines)]
 
@@ -223,20 +226,18 @@ trainer_aovsum <- function(x,
   # T-test filtering pipeline
   # ---------------------------------------------------------------------------
 
-  t_req <- if (!is.null(t_test) && length(t_test) && any(nzchar(t_test))) {
+  t_req <- if (!is.null(t_test)) {
     trimws(as.character(t_test))
   } else {
     character(0)
   }
 
+  t_req <- t_req[nzchar(t_req)]
+
   req_main <- t_req[!grepl(":", t_req, fixed = TRUE)]
   req_inter <- t_req[grepl(":", t_req, fixed = TRUE)]
 
-  requested <- if (length(t_req)) {
-    c(req_main, req_inter)
-  } else {
-    NULL
-  }
+  requested <- if (length(t_req)) t_req else NULL
 
   ttest_filtered <- trainer_core_filter_ttest_by_factors(
     tt_lines       = ttest_lines,
@@ -421,4 +422,132 @@ trainer_aovsum <- function(x,
 trainer_AovSum <- function(aovsum_obj, ...) {
   .Deprecated("trainer_aovsum")
   trainer_aovsum(x = aovsum_obj, ...)
+}
+
+trainer_core_filter_ttest_by_factors <- function(tt_lines,
+                                                 keep_factors = NULL,
+                                                 keep_intercept = TRUE) {
+  tt_lines <- trainer_core_as_lines(tt_lines)
+
+  if (!length(tt_lines)) {
+    return(character(0))
+  }
+
+  if (is.null(keep_factors) || !length(keep_factors)) {
+    return(tt_lines)
+  }
+
+  keep_factors <- trimws(as.character(keep_factors))
+  keep_factors <- keep_factors[nzchar(keep_factors)]
+
+  if (!length(keep_factors)) {
+    return(tt_lines)
+  }
+
+  # Keep header lines
+  header_idx <- grepl("\\bEstimate\\b", tt_lines, perl = TRUE) |
+    grepl("Std\\.?\\s*Error", tt_lines, perl = TRUE) |
+    grepl("Pr\\(>\\|?t\\|?\\)", tt_lines, perl = TRUE)
+
+  # Keep intercept if requested
+  intercept_idx <- grepl("^\\s*\\(?Intercept\\)?\\b", tt_lines, perl = TRUE)
+
+  # Extract the label before the first numeric column.
+  # Example:
+  # "Product - choc1   4.48e-01  0.23 ..."
+  # becomes:
+  # "Product - choc1"
+  term_labels <- sub(
+    "\\s+[-+]?((\\d+\\.?\\d*)|(\\.\\d+))([eE][-+]?\\d+)?\\s+.*$",
+    "",
+    tt_lines,
+    perl = TRUE
+  )
+
+  term_labels <- trimws(term_labels)
+
+  is_interaction_line <- grepl("\\s+:\\s+", term_labels, perl = TRUE)
+
+  requested_main <- keep_factors[!grepl(":", keep_factors, fixed = TRUE)]
+  requested_inter <- keep_factors[grepl(":", keep_factors, fixed = TRUE)]
+
+  main_idx <- rep(FALSE, length(tt_lines))
+  inter_idx <- rep(FALSE, length(tt_lines))
+
+  # Main effects:
+  # t_test = "Product" keeps "Product - choc1", "Product - choc2", etc.
+  # but not "Product - choc1 : Panelist - 1".
+  if (length(requested_main)) {
+    main_idx <- Reduce(
+      `|`,
+      lapply(requested_main, function(fac) {
+        grepl(
+          paste0("^", trainer_core_regex_escape(fac), "\\s+-\\s+"),
+          term_labels,
+          perl = TRUE
+        ) & !is_interaction_line
+      })
+    )
+  }
+
+  # Interactions:
+  # t_test = "Product:Panelist" keeps
+  # "Product - choc1 : Panelist - 1", etc.
+  if (length(requested_inter)) {
+    inter_idx <- Reduce(
+      `|`,
+      lapply(requested_inter, function(inter) {
+        parts <- trimws(strsplit(inter, ":", fixed = TRUE)[[1]])
+
+        if (length(parts) != 2L || any(!nzchar(parts))) {
+          return(rep(FALSE, length(tt_lines)))
+        }
+
+        left <- trainer_core_regex_escape(parts[1])
+        right <- trainer_core_regex_escape(parts[2])
+
+        pattern_1 <- paste0(
+          "^", left, "\\s+-\\s+.*\\s+:\\s+",
+          right, "\\s+-\\s+"
+        )
+
+        pattern_2 <- paste0(
+          "^", right, "\\s+-\\s+.*\\s+:\\s+",
+          left, "\\s+-\\s+"
+        )
+
+        is_interaction_line &
+          (
+            grepl(pattern_1, term_labels, perl = TRUE) |
+              grepl(pattern_2, term_labels, perl = TRUE)
+          )
+      })
+    )
+  }
+
+  keep_idx <- header_idx | main_idx | inter_idx
+
+  if (isTRUE(keep_intercept)) {
+    keep_idx <- keep_idx | intercept_idx
+  }
+
+  tt_lines[keep_idx]
+}
+
+
+trainer_core_regex_escape <- function(x) {
+  gsub("([][{}()+*^$|\\\\?.])", "\\\\\\1", x)
+}
+
+trainer_core_as_lines <- function(x) {
+  if (is.null(x) || !length(x)) {
+    return(character(0))
+  }
+
+  x <- as.character(x)
+
+  unlist(
+    strsplit(x, "\n", fixed = TRUE),
+    use.names = FALSE
+  )
 }
