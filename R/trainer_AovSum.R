@@ -79,7 +79,7 @@
 #' }
 #'
 #' @export
-trainer_aovsum <- function(x,
+trainer_aovsum <- function(x = NULL,
                            introduction = NULL,
                            alpha = 0.05,
                            t_test = NULL,
@@ -88,7 +88,21 @@ trainer_aovsum <- function(x,
                            llm_model = "llama3",
                            generate = FALSE,
                            llm_engine = c("ollama", "gemini", "none"),
-                           ...) {
+                           ...,
+                           aovsum_obj = NULL) {
+
+  if (!is.null(aovsum_obj)) {
+    if (!is.null(x)) {
+      stop("Use either `x` or `aovsum_obj`, not both.", call. = FALSE)
+    }
+
+    warning(
+      "`aovsum_obj` is deprecated in `trainer_aovsum()`. Use `x` instead.",
+      call. = FALSE
+    )
+
+    x <- aovsum_obj
+  }
 
   aovsum_obj <- x
 
