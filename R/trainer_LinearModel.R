@@ -158,8 +158,8 @@ trainer_linear_model <- function(lm_obj = NULL,
     }
   }
 
-  ftest_lines <- trimws(ftest_lines, which = "both")
-  ttest_lines <- trimws(ttest_lines, which = "both")
+  ftest_lines <- trimws(ftest_lines, which = "right")
+  ttest_lines <- trimws(ttest_lines, which = "right")
 
   ftest_lines <- ftest_lines[nzchar(ftest_lines)]
   ttest_lines <- ttest_lines[nzchar(ttest_lines)]

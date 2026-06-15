@@ -163,8 +163,8 @@ trainer_aovsum <- function(aovsum_obj = NULL,
 
     if (!length(ftest_lines) && !length(ttest_lines)) {
       blocks <- trainer_core_extract_tables_heuristic(aovsum_txt)
-      ftest_lines <- trimws(blocks$ftest_lines, which = "both")
-      ttest_lines <- trimws(blocks$ttest_lines, which = "both")
+      ftest_lines <- trimws(blocks$ftest_lines, which = "right")
+      ttest_lines <- trimws(blocks$ttest_lines, which = "right")
 
       # Ultimate fallback if heuristic also failed: assume everything is F-test
       if (!length(ftest_lines) && !length(ttest_lines)) {
@@ -190,11 +190,11 @@ trainer_aovsum <- function(aovsum_obj = NULL,
   ftest_lines <- trainer_core_as_lines(ftest_lines)
   ttest_lines <- trainer_core_as_lines(ttest_lines)
 
-  ftest_lines <- trimws(ftest_lines, which = "both")
-  ttest_lines <- trimws(ttest_lines, which = "both")
+  ftest_lines <- trimws(ftest_lines, which = "right")
+  ttest_lines <- trimws(ttest_lines, which = "right")
 
-  ftest_lines <- ftest_lines[nzchar(ftest_lines)]
-  ttest_lines <- ttest_lines[nzchar(ttest_lines)]
+  ftest_lines <- ftest_lines[nzchar(trimws(ftest_lines))]
+  ttest_lines <- ttest_lines[nzchar(trimws(ttest_lines))]
 
   # Trim trailing "Signif. codes" in F-test
   if (length(ftest_lines)) {
