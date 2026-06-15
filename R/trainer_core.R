@@ -968,31 +968,53 @@ trainer_core_detect_main_factors <- function(tt_lines) {
 #' @examples
 #' trainer_core_actually_shown("A", "A:B", c("A - a", "A - a : B - b"))
 trainer_core_actually_shown <- function(req_main, req_inter, ttest_filtered) {
+  ttest_filtered <- trainer_core_as_lines(ttest_filtered)
+
+  if (!length(ttest_filtered)) {
+    return(character(0))
+  }
+
   found_main <- character(0)
+
   if (length(req_main)) {
     found_main <- req_main[vapply(req_main, function(f) {
-      pat <- paste0("^\\s*", trainer_core_quote(f), "\\s-\\s")
-      any(grepl(pat, ttest_filtered, perl = TRUE) & !grepl(":", ttest_filtered, fixed = TRUE))
+      pat <- paste0(
+        "^\\s*",
+        trainer_core_quote(f),
+        "\\s+-\\s+"
+      )
+
+      any(
+        grepl(pat, ttest_filtered, perl = TRUE) &
+          !grepl(":", ttest_filtered, fixed = TRUE)
+      )
     }, logical(1))]
   }
 
   found_inter <- character(0)
+
   if (length(req_inter)) {
     found_inter <- req_inter[vapply(req_inter, function(f) {
       parts <- strsplit(f, ":", fixed = TRUE)[[1]]
-      if (length(parts) != 2) return(FALSE)
-      a <- trainer_core_quote(trimws(parts[1])); b <- trainer_core_quote(trimws(parts[2]))
-      any(grepl(
-        paste0(
-          "^\\s*", a, "\\s-\\s.*:\\s*", b, "\\s-\\s", "|",
-          "^\\s*", b, "\\s-\\s.*:\\s*", a, "\\s-\\s"
-        ),
-        ttest_filtered,
-        perl = TRUE
-      ))
+
+      if (length(parts) != 2L) {
+        return(FALSE)
+      }
+
+      a <- trainer_core_quote(trimws(parts[1]))
+      b <- trainer_core_quote(trimws(parts[2]))
+
+      pat <- paste0(
+        "^\\s*", a, "\\s+-\\s+.*\\s+:\\s*", b, "\\s+-\\s+",
+        "|",
+        "^\\s*", b, "\\s+-\\s+.*\\s+:\\s*", a, "\\s+-\\s+"
+      )
+
+      any(grepl(pat, ttest_filtered, perl = TRUE))
     }, logical(1))]
   }
-  c(found_main, found_inter)
+
+  unique(c(found_main, found_inter))
 }
 
 #' Scope message for T-test section based on requested & found factors

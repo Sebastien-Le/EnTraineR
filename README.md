@@ -78,7 +78,7 @@ intro <- "Six chocolates have been evaluated by a sensory panel,
 intro <- gsub("\n", " ", intro)
 intro <- stringr::str_squish(intro)
 
-p <- trainer_AovSum(
+p <- trainer_aovsum(
   aovsum_obj   = res,
   audience     = "applied",
   t_test       = c("Product", "Panelist"),  # filter T-test section
@@ -99,7 +99,7 @@ intro_ham <- stringr::str_squish(gsub("\n", " ", intro_ham))
 
 fit <- LinearModel(`Overall liking` ~ ., data = ham, selection = "bic")
 
-pr <- trainer_LinearModel(
+pr <- trainer_linear_model(
   lm_obj       = fit,
   introduction = intro_ham,
   audience     = "advanced"
@@ -114,7 +114,7 @@ Another linear model with interaction and a categorical factor:
 fit2 <- LinearModel(Temp_water ~ Temp_air * Deforestation,
                     data = deforestation, selection = "none")
 
-pr2 <- trainer_LinearModel(
+pr2 <- trainer_linear_model(
   lm_obj       = fit2,
   introduction = "Effect of deforestation on the air-water temperature link.",
   audience     = "beginner"

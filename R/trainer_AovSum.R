@@ -5,7 +5,7 @@
 #' it only passes verbatim excerpts to the LLM and instructs how to interpret
 #' deviations (sum-to-zero coding) as performance drivers.
 #'
-#' @param x An object whose printed output contains sections named
+#' @param aovsum_obj An object whose printed output contains sections named
 #'   "Ftest" and "Ttest" (e.g., \code{FactoMineR::AovSum()}).
 #' @param introduction Optional character context paragraph for the analysis.
 #'   Defaults to a generic description.
@@ -79,7 +79,7 @@
 #' }
 #'
 #' @export
-trainer_aovsum <- function(x = NULL,
+trainer_aovsum <- function(aovsum_obj = NULL,
                            introduction = NULL,
                            alpha = 0.05,
                            t_test = NULL,
@@ -89,22 +89,20 @@ trainer_aovsum <- function(x = NULL,
                            generate = FALSE,
                            llm_engine = c("ollama", "gemini", "none"),
                            ...,
-                           aovsum_obj = NULL) {
+                           x = NULL) {
 
-  if (!is.null(aovsum_obj)) {
-    if (!is.null(x)) {
-      stop("Use either `x` or `aovsum_obj`, not both.", call. = FALSE)
-    }
+  if (!is.null(aovsum_obj) && !is.null(x)) {
+    stop("Use either `aovsum_obj` or `x`, not both.", call. = FALSE)
+  }
 
+  if (is.null(aovsum_obj) && !is.null(x)) {
     warning(
-      "`aovsum_obj` is deprecated in `trainer_aovsum()`. Use `x` instead.",
+      "`x` is accepted for compatibility, but `aovsum_obj` is preferred in `trainer_aovsum()`.",
       call. = FALSE
     )
 
-    x <- aovsum_obj
+    aovsum_obj <- x
   }
-
-  aovsum_obj <- x
 
   audience <- match.arg(audience)
   alpha <- trainer_core_check_probability(alpha, "alpha")
@@ -119,7 +117,7 @@ trainer_aovsum <- function(x = NULL,
   }
 
   if (is.null(aovsum_obj)) {
-    stop("`x` cannot be NULL.", call. = FALSE)
+    stop("`aovsum_obj` cannot be NULL.", call. = FALSE)
   }
 
   # ---------------------------------------------------------------------------
@@ -171,7 +169,7 @@ trainer_aovsum <- function(x = NULL,
       # Ultimate fallback if heuristic also failed: assume everything is F-test
       if (!length(ftest_lines) && !length(ttest_lines)) {
         warning(
-          "Could not detect `Ftest` or `Ttest` sections in `x`. ",
+          "Could not detect `Ftest` or `Ttest` sections in `aovsum_obj`. ",
           "The full printed output will be used as a fallback, but interpretation may be limited.",
           call. = FALSE
         )
@@ -188,11 +186,12 @@ trainer_aovsum <- function(x = NULL,
   # Clean extracted blocks
   # ---------------------------------------------------------------------------
 
-  ftest_lines <- trimws(ftest_lines, which = "both")
-  ttest_lines <- trimws(ttest_lines, which = "both")
 
   ftest_lines <- trainer_core_as_lines(ftest_lines)
   ttest_lines <- trainer_core_as_lines(ttest_lines)
+
+  ftest_lines <- trimws(ftest_lines, which = "both")
+  ttest_lines <- trimws(ttest_lines, which = "both")
 
   ftest_lines <- ftest_lines[nzchar(ftest_lines)]
   ttest_lines <- ttest_lines[nzchar(ttest_lines)]
@@ -431,11 +430,11 @@ trainer_aovsum <- function(x = NULL,
 #' Deprecated alias for `trainer_aovsum()`
 #'
 #' @rdname trainer_aovsum
-#' @param aovsum_obj Deprecated name for `x`.
+#' @param aovsum_obj A FactoMineR::AovSum object.
 #' @export
-trainer_AovSum <- function(aovsum_obj, ...) {
+trainer_AovSum <- function(aovsum_obj = NULL, ...) {
   .Deprecated("trainer_aovsum")
-  trainer_aovsum(x = aovsum_obj, ...)
+  trainer_aovsum(aovsum_obj = aovsum_obj, ...)
 }
 
 trainer_core_filter_ttest_by_factors <- function(tt_lines,

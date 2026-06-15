@@ -7,7 +7,7 @@
 #' instructs how to interpret deviation contrasts (sum-to-zero) for factors.
 #' Works for ANOVA, ANCOVA, and multiple regression.
 #'
-#' @param x An object returned by FactoMineR::LinearModel(...).
+#' @param lm_obj An object returned by FactoMineR::LinearModel(...).
 #' @param introduction Optional character string giving the study context.
 #' @param alpha Numeric significance level (default 0.05).
 #' @param t_test Optional character vector to filter the T-test section by
@@ -68,18 +68,30 @@
 #' }
 #'
 #' @export
-trainer_linear_model <- function(x,
-                                introduction = NULL,
-                                alpha = 0.05,
-                                t_test = NULL,
-                                audience = c("beginner","applied","advanced"),
-                                summary_only = FALSE,
-                                llm_model = "llama3",
-                                generate = FALSE,
-                                llm_engine = c("ollama", "gemini", "none"),
-                                ...) {
+trainer_linear_model <- function(lm_obj = NULL,
+                                 introduction = NULL,
+                                 alpha = 0.05,
+                                 t_test = NULL,
+                                 audience = c("beginner", "applied", "advanced"),
+                                 summary_only = FALSE,
+                                 llm_model = "llama3",
+                                 generate = FALSE,
+                                 llm_engine = c("ollama", "gemini", "none"),
+                                 ...,
+                                 x = NULL) {
 
-  lm_obj <- x
+  if (!is.null(lm_obj) && !is.null(x)) {
+    stop("Use either `lm_obj` or `x`, not both.", call. = FALSE)
+  }
+
+  if (is.null(lm_obj) && !is.null(x)) {
+    warning(
+      "`x` is accepted for compatibility, but `lm_obj` is preferred in `trainer_linear_model()`.",
+      call. = FALSE
+    )
+
+    lm_obj <- x
+  }
 
   audience <- match.arg(audience)
   alpha <- trainer_core_check_probability(alpha, "alpha")
@@ -91,9 +103,13 @@ trainer_linear_model <- function(x,
   if (!is.null(t_test) && (!is.character(t_test) || anyNA(t_test))) {
     stop("`t_test` must be NULL or a character vector without missing values.", call. = FALSE)
   }
+  if (is.null(lm_obj)) {
+    stop("`lm_obj` cannot be NULL.", call. = FALSE)
+  }
+
   if (!is.character(lm_obj) && !inherits(lm_obj, "LinearModel")) {
     stop(
-      "`x` must be an object returned by `FactoMineR::LinearModel()` ",
+      "`lm_obj` must be an object returned by `FactoMineR::LinearModel()` ",
       "or a character string containing a printed LinearModel output.",
       call. = FALSE
     )
@@ -130,14 +146,23 @@ trainer_linear_model <- function(x,
   ftest_lines <- trainer_core_extract_block_after(scope_txt, "Ftest")
   ttest_lines <- trainer_core_extract_block_after(scope_txt, "Ttest")
 
+  ftest_lines <- trainer_core_as_lines(ftest_lines)
+  ttest_lines <- trainer_core_as_lines(ttest_lines)
+
   if (!length(ftest_lines) && !length(ttest_lines)) {
     blocks <- trainer_core_extract_tables_heuristic(scope_txt)
-    ftest_lines <- trimws(blocks$ftest_lines, which = "both")
-    ttest_lines <- trimws(blocks$ttest_lines, which = "both")
+    ftest_lines <- trainer_core_as_lines(blocks$ftest_lines)
+    ttest_lines <- trainer_core_as_lines(blocks$ttest_lines)
     if (!length(ftest_lines) && !length(ttest_lines) && length(selected_block) > 0) {
       ftest_lines <- selected_block
     }
   }
+
+  ftest_lines <- trimws(ftest_lines, which = "both")
+  ttest_lines <- trimws(ttest_lines, which = "both")
+
+  ftest_lines <- ftest_lines[nzchar(ftest_lines)]
+  ttest_lines <- ttest_lines[nzchar(ttest_lines)]
 
   # Trim trailing "Signif. codes" in F-test
   if (length(ftest_lines)) {
@@ -157,10 +182,17 @@ trainer_linear_model <- function(x,
   }
 
   # --- T-test filtering (space-safe; mains + interactions) -------------------
-  t_req <- if (!is.null(t_test) && length(t_test) && any(nzchar(t_test))) trimws(as.character(t_test)) else character(0)
+  t_req <- if (!is.null(t_test)) {
+    trimws(as.character(t_test))
+  } else {
+    character(0)
+  }
+
+  t_req <- t_req[nzchar(t_req)]
+
   req_main  <- t_req[!grepl(":", t_req, fixed = TRUE)]
   req_inter <- t_req[ grepl(":", t_req,  fixed = TRUE)]
-  requested <- if (length(t_req)) c(req_main, req_inter) else NULL
+  requested <- if (length(t_req)) t_req else NULL
 
   ttest_filtered <- trainer_core_filter_ttest_by_factors(
     tt_lines       = ttest_lines,
@@ -329,9 +361,9 @@ trainer_linear_model <- function(x,
 #' Deprecated alias for `trainer_linear_model()`
 #'
 #' @rdname trainer_linear_model
-#' @param lm_obj Deprecated name for `x`.
+#' @param lm_obj An object returned by FactoMineR::LinearModel(...).
 #' @export
-trainer_LinearModel <- function(lm_obj, ...) {
+trainer_LinearModel <- function(lm_obj = NULL, ...) {
   .Deprecated("trainer_linear_model")
-  trainer_linear_model(x = lm_obj, ...)
+  trainer_linear_model(lm_obj = lm_obj, ...)
 }
