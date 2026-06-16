@@ -5,9 +5,6 @@
 An intelligent teaching assistant based on LLMs to help interpret statistical model outputs in R.  
 `EnTraineR` builds audience-aware prompts (beginner, applied, advanced) that **never invent numbers**: it passes verbatim outputs from R and instructs how to explain them.
 
-> Works out of the box to produce high-quality prompts.  
-> Optionally, you can connect your own LLM backend (via your functions built on top of `trainer_core_generate_or_return()`).
-
 ## Installation
 
 From GitHub:
